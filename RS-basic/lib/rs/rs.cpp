@@ -1,6 +1,17 @@
 #include <Arduino.h>
 #include "rs.hpp"
 
+// Porównanie współczynników z tolerancją
+bool coefficientsEqual(double coeffs1[], double coeffs2[], int size,
+                       double tolerance) {
+    for (int i = 0; i < size; i++) {
+        if (abs(coeffs1[i] - coeffs2[i]) > tolerance) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // Multiply a polynomial by (x - a)
 void multiplyPoly(double poly[], int size, double a, double result[]) {
   for (int i = 0; i <= size; i++) result[i] = 0.0;
