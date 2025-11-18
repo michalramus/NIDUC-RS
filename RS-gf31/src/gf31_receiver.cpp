@@ -111,35 +111,26 @@ void copy_points_except(Point *src, int n, Point *dst, int skip_idx) {
 
 // Główna funkcja korekcji błędów Reed-Solomon
 int reed_solomon_decode(Point *pts, int n, int coeffs[], int *error_idx) {
-  // n = 6 punktów, potrzebujemy 4 do interpolacji (wielomian stopnia 3)
-  // Mamy 2 punkty nadmiarowe - możemy skorygować 1 błąd
-  
   if (n < 4) {
-    return -1; // Za mało punktów
+    return -1;
   }
   
-  // Krok 1: Spróbuj interpolować z pierwszych 4 punktów
   lagrange_interpolate(pts, 4, coeffs);
   
-  // Krok 2: Sprawdź czy wszystkie 6 punktów pasuje do wielomianu
   if (verify_points(pts, n, coeffs, 3)) {
     Serial.println("✓ Brak błędów - wszystkie punkty poprawne!");
-    return 0; // Brak błędów
+    return 0;
   }
   
   Serial.println("⚠️ Wykryto niezgodności - próba korekcji...");
   
-  // Krok 3: Są błędy - spróbuj znaleźć 1 błędny punkt
-  // Testuj wszystkie kombinacje wykluczające po 1 punkcie
   for (int skip = 0; skip < n; skip++) {
     Point test_points[6];
     copy_points_except(pts, n, test_points, skip);
     
-    // Interpoluj z 5 punktów (używając pierwszych 4)
     int test_coeffs[MAX_COEFFS];
     lagrange_interpolate(test_points, 4, test_coeffs);
     
-    // Sprawdź czy wszystkie 5 punktów pasuje do wielomianu
     if (verify_points(test_points, n - 1, test_coeffs, 3)) {
       Serial.print("✓ KOREKCJA: Znaleziono błędny punkt #");
       Serial.println(skip);
@@ -149,7 +140,6 @@ int reed_solomon_decode(Point *pts, int n, int coeffs[], int *error_idx) {
       Serial.print(pts[skip].y);
       Serial.println(")");
       
-      // Oblicz poprawną wartość
       int correct_y = evaluate_polynomial(test_coeffs, 3, pts[skip].x);
       Serial.print("  Poprawna wartość: (");
       Serial.print(pts[skip].x);
@@ -157,19 +147,17 @@ int reed_solomon_decode(Point *pts, int n, int coeffs[], int *error_idx) {
       Serial.print(correct_y);
       Serial.println(")");
       
-      // Skopiuj poprawne współczynniki
       for (int i = 0; i < MAX_COEFFS; i++) {
         coeffs[i] = test_coeffs[i];
       }
       
       *error_idx = skip;
-      return 1; // 1 błąd skorygowany
+      return 1;
     }
   }
   
-  // Krok 4: Nie udało się znaleźć 1 błędnego punktu - mamy 2 lub więcej błędów
   Serial.println("❌ BŁĄD: Wykryto 2 lub więcej błędów - nie można skorygować!");
-  return 2; // 2 lub więcej błędów
+  return 2;
 }
 
 void setup() {
