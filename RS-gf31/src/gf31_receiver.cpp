@@ -317,13 +317,19 @@ void loop() {
                 int unique_count = selectUniquePoints(points, 6, unique_points);
 
                 if (unique_count >= 4) {
+                    // Try to interpolate polynomial with unique points
                     int coeffs[MAX_COEFFS];
-                    int error_idx;
-                    int error_count = reed_solomon_decode(
-                        unique_points, unique_count, coeffs, &error_idx);
+                    lagrange_interpolate(unique_points, 4, coeffs);
 
-                    // Result already counted in reed_solomon_decode
-                    // (corrected or detected based on correction success)
+                    // Check if the polynomial fits all unique points
+                    if (verify_points(unique_points, unique_count, coeffs, 3)) {
+                        // Successfully recreated polynomial despite x
+                        // duplicates
+                        corrected_transmissions++;
+                    } else {
+                        // Unable to recreate valid polynomial
+                        failed_corrections++;
+                    }
                 } else {
                     // Not enough unique points
                     failed_corrections++;

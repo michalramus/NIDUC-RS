@@ -39,8 +39,13 @@ void send_point(int x, int y) {
 // Introduce error to y value
 int introduce_y_error(int y) {
     // Add random value from 1 to 30 (in GF(31))
-    int error = (random(1, 31));
-    return gf_add(y, error);
+    // Make sure the new value is different from original
+    int new_y = y;
+    while (new_y == y) {
+        int error = random(1, 31);
+        new_y = gf_add(y, error);
+    }
+    return new_y;
 }
 
 // Introduce error to x value
