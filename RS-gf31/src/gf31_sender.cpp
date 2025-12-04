@@ -8,14 +8,14 @@ SoftwareSerial softSerial(13, 12);  // RX, TX D7, D6
 
 int coeffs[MAX_COEFFS] = {5, 7, 3, 2};
 
-// Tryby transmisji:
-// 0 = dobra (bez błędów)
-// 1 = 1 błąd w y
-// 2 = 2 błędy w y
-// 3 = 1 błąd w x
-// 4 = 1 błąd w x i 1 błąd w y
-// 5 = 2 błędy w x
-int transmission_mode = 0;  // Wybierany przez użytkownika
+// Transmission modes:
+// 0 = clean (no errors)
+// 1 = 1 error in y
+// 2 = 2 errors in y
+// 3 = 1 error in x
+// 4 = 1 error in x and 1 error in y
+// 5 = 2 errors in x
+int transmission_mode = 0;  // Selected by user
 const int MESSAGES_PER_TEST = 1000;
 int messages_sent = 0;
 bool test_started = false;
@@ -36,18 +36,18 @@ void send_point(int x, int y) {
     softSerial.write(frame);
 }
 
-// Funkcja wprowadzająca błąd do wartości y
+// Introduce error to y value
 int introduce_y_error(int y) {
-    // Dodaj losową wartość od 1 do 30 (w GF(31))
+    // Add random value from 1 to 30 (in GF(31))
     int error = (random(1, 31));
     return gf_add(y, error);
 }
 
-// Funkcja wprowadzająca błąd do wartości x
+// Introduce error to x value
 int introduce_x_error(int x) {
-    // Zmień x na inną losową wartość z zakresu [0, 5]
+    // Change x to another random value from range [0, 5]
     int new_x = random(0, 6);
-    // Upewnij się, że jest inna niż oryginalna
+    // Make sure it's different from original
     while (new_x == x) {
         new_x = random(0, 6);
     }
@@ -55,37 +55,22 @@ int introduce_x_error(int x) {
 }
 
 void send_transmission() {
-    int x_values[6] = {0, 1, 2, 3, 4, 5};  // Domyślne wartości x
+    int x_values[6] = {0, 1, 2, 3, 4, 5};  // Default x values
     int y_values[6];
-    bool is_x_error[6] = {false, false, false, false, false, false};
-    bool is_y_error[6] = {false, false, false, false, false, false};
 
-    // Oblicz wszystkie poprawne wartości y
+    // Calculate all correct y values
     for (int x = 0; x < 6; x++) {
         y_values[x] = poly_eval(x);
     }
 
-    // Wprowadź błędy w zależności od trybu
+    // Introduce errors based on mode
     if (transmission_mode == 1) {
-        // 1 błąd w y - w losowej pozycji
+        // 1 error in y - at random position
         int error_position = random(0, 6);
-        int original_y = y_values[error_position];
         y_values[error_position] = introduce_y_error(y_values[error_position]);
-        is_y_error[error_position] = true;
-
-        Serial.println("⚠️  WPROWADZAM 1 BŁĄD W Y");
-        Serial.print("   Błąd w punkcie #");
-        Serial.print(error_position);
-        Serial.print(" x=");
-        Serial.print(x_values[error_position]);
-        Serial.print(" (poprawne y=");
-        Serial.print(original_y);
-        Serial.print(", błędne y=");
-        Serial.print(y_values[error_position]);
-        Serial.println(")");
 
     } else if (transmission_mode == 2) {
-        // 2 błędy w y - w losowych pozycjach
+        // 2 errors in y - at random positions
         int error_pos1 = random(0, 6);
         int error_pos2 = random(0, 6);
 
@@ -93,57 +78,16 @@ void send_transmission() {
             error_pos2 = random(0, 6);
         }
 
-        int original_y1 = y_values[error_pos1];
-        int original_y2 = y_values[error_pos2];
-
         y_values[error_pos1] = introduce_y_error(y_values[error_pos1]);
         y_values[error_pos2] = introduce_y_error(y_values[error_pos2]);
-        is_y_error[error_pos1] = true;
-        is_y_error[error_pos2] = true;
-
-        Serial.println("❌❌ WPROWADZAM 2 BŁĘDY W Y");
-        Serial.print("   Błąd 1 w punkcie #");
-        Serial.print(error_pos1);
-        Serial.print(" x=");
-        Serial.print(x_values[error_pos1]);
-        Serial.print(" (poprawne y=");
-        Serial.print(original_y1);
-        Serial.print(", błędne y=");
-        Serial.print(y_values[error_pos1]);
-        Serial.println(")");
-
-        Serial.print("   Błąd 2 w punkcie #");
-        Serial.print(error_pos2);
-        Serial.print(" x=");
-        Serial.print(x_values[error_pos2]);
-        Serial.print(" (poprawne y=");
-        Serial.print(original_y2);
-        Serial.print(", błędne y=");
-        Serial.print(y_values[error_pos2]);
-        Serial.println(")");
 
     } else if (transmission_mode == 3) {
-        // 1 błąd w x - w losowej pozycji
+        // 1 error in x - at random position
         int error_position = random(0, 6);
-        int original_x = x_values[error_position];
         x_values[error_position] = introduce_x_error(x_values[error_position]);
-        is_x_error[error_position] = true;
-
-        Serial.println("⚠️  WPROWADZAM 1 BŁĄD W X");
-        Serial.print("   Błąd w punkcie #");
-        Serial.print(error_position);
-        Serial.print(" (poprawne x=");
-        Serial.print(original_x);
-        Serial.print(", błędne x=");
-        Serial.print(x_values[error_position]);
-        Serial.print(", y=");
-        Serial.print(y_values[error_position]);
-        Serial.println(")");
-        Serial.println(
-            "   ⚠️  UWAGA: To spowoduje duplikat x lub niepoprawną wartość!");
 
     } else if (transmission_mode == 4) {
-        // 1 błąd w x i 1 błąd w y - w różnych pozycjach
+        // 1 error in x and 1 error in y - at different positions
         int x_error_pos = random(0, 6);
         int y_error_pos = random(0, 6);
 
@@ -151,35 +95,11 @@ void send_transmission() {
             y_error_pos = random(0, 6);
         }
 
-        int original_x = x_values[x_error_pos];
-        int original_y = y_values[y_error_pos];
-
         x_values[x_error_pos] = introduce_x_error(x_values[x_error_pos]);
         y_values[y_error_pos] = introduce_y_error(y_values[y_error_pos]);
-        is_x_error[x_error_pos] = true;
-        is_y_error[y_error_pos] = true;
-
-        Serial.println("❌❌ WPROWADZAM 1 BŁĄD W X i 1 BŁĄD W Y");
-        Serial.print("   Błąd X w punkcie #");
-        Serial.print(x_error_pos);
-        Serial.print(" (poprawne x=");
-        Serial.print(original_x);
-        Serial.print(", błędne x=");
-        Serial.print(x_values[x_error_pos]);
-        Serial.println(")");
-
-        Serial.print("   Błąd Y w punkcie #");
-        Serial.print(y_error_pos);
-        Serial.print(" x=");
-        Serial.print(x_values[y_error_pos]);
-        Serial.print(" (poprawne y=");
-        Serial.print(original_y);
-        Serial.print(", błędne y=");
-        Serial.print(y_values[y_error_pos]);
-        Serial.println(")");
 
     } else if (transmission_mode == 5) {
-        // 2 błędy w x - w losowych pozycjach
+        // 2 errors in x - at random positions
         int error_pos1 = random(0, 6);
         int error_pos2 = random(0, 6);
 
@@ -187,59 +107,13 @@ void send_transmission() {
             error_pos2 = random(0, 6);
         }
 
-        int original_x1 = x_values[error_pos1];
-        int original_x2 = x_values[error_pos2];
-
         x_values[error_pos1] = introduce_x_error(x_values[error_pos1]);
         x_values[error_pos2] = introduce_x_error(x_values[error_pos2]);
-        is_x_error[error_pos1] = true;
-        is_x_error[error_pos2] = true;
-
-        Serial.println("❌❌❌ WPROWADZAM 2 BŁĘDY W X");
-        Serial.print("   Błąd 1 w punkcie #");
-        Serial.print(error_pos1);
-        Serial.print(" (poprawne x=");
-        Serial.print(original_x1);
-        Serial.print(", błędne x=");
-        Serial.print(x_values[error_pos1]);
-        Serial.println(")");
-
-        Serial.print("   Błąd 2 w punkcie #");
-        Serial.print(error_pos2);
-        Serial.print(" (poprawne x=");
-        Serial.print(original_x2);
-        Serial.print(", błędne x=");
-        Serial.print(x_values[error_pos2]);
-        Serial.println(")");
-        Serial.println("   ⚠️  UWAGA: To spowoduje poważne błędy w x!");
     }
 
-    Serial.println();
-
-    // Wyślij wszystkie punkty
+    // Send all points (silently)
     for (int i = 0; i < 6; i++) {
-        Serial.print("Wysyłam punkt #");
-        Serial.print(i);
-        Serial.print(": x=");
-        Serial.print(x_values[i]);
-        Serial.print(" y=");
-        Serial.print(y_values[i]);
-
-        if (is_x_error[i] && is_y_error[i]) {
-            Serial.print(" 🔴🔴 [BŁĄD X+Y]");
-        } else if (is_x_error[i]) {
-            Serial.print(" 🔴 [BŁĄD X]");
-        } else if (is_y_error[i]) {
-            Serial.print(" 🔴 [BŁĄD Y]");
-        } else {
-            Serial.print(" ✓");
-        }
-
-        Serial.print(" frame=0x");
-        Serial.println(((x_values[i] << 5) | y_values[i]), HEX);
-
         send_point(x_values[i], y_values[i]);
-        // Brak delay - wysyłaj tak szybko jak możliwe
     }
 }
 
@@ -249,27 +123,27 @@ void setup() {
     randomSeed(analogRead(0));
     delay(2000);
 
-    Serial.println("═══════════════════════════════════════════════════════");
-    Serial.println("    GF(31) SENDER - TEST 1000 WIADOMOŚCI");
-    Serial.println("═══════════════════════════════════════════════════════");
+    Serial.println("=======================================================");
+    Serial.println("    GF(31) SENDER - 1000 MESSAGE TEST");
+    Serial.println("=======================================================");
     Serial.println();
-    Serial.println("Dostępne tryby testowe:");
-    Serial.println("  0: DOBRA (bez błędów)");
-    Serial.println("  1: 1 BŁĄD w Y");
-    Serial.println("  2: 2 BŁĘDY w Y");
-    Serial.println("  3: 1 BŁĄD w X");
-    Serial.println("  4: 1 BŁĄD w X + 1 BŁĄD w Y");
-    Serial.println("  5: 2 BŁĘDY w X");
+    Serial.println("Available test modes:");
+    Serial.println("  0: CLEAN (no errors)");
+    Serial.println("  1: 1 ERROR in Y");
+    Serial.println("  2: 2 ERRORS in Y");
+    Serial.println("  3: 1 ERROR in X");
+    Serial.println("  4: 1 ERROR in X + 1 ERROR in Y");
+    Serial.println("  5: 2 ERRORS in X");
     Serial.println();
-    Serial.println("Wprowadź numer trybu (0-5) i naciśnij Enter:");
+    Serial.println("Enter mode number (0-5) and press Enter:");
 }
 
 void loop() {
-    // Czekaj na wybór trybu przez użytkownika
+    // Wait for user mode selection
     if (!test_started && Serial.available() > 0) {
         int input = Serial.read();
 
-        // Odczytaj resztę z bufora
+        // Read rest from buffer
         while (Serial.available() > 0) {
             Serial.read();
         }
@@ -280,71 +154,71 @@ void loop() {
 
             Serial.println();
             Serial.println(
-                "═══════════════════════════════════════════════════════");
-            Serial.print("Wybrany tryb: ");
+                "=======================================================");
+            Serial.print("Selected mode: ");
             Serial.print(transmission_mode);
             Serial.print(" - ");
             switch (transmission_mode) {
                 case 0:
-                    Serial.println("DOBRA (bez błędów)");
+                    Serial.println("CLEAN (no errors)");
                     break;
                 case 1:
-                    Serial.println("1 BŁĄD w Y");
+                    Serial.println("1 ERROR in Y");
                     break;
                 case 2:
-                    Serial.println("2 BŁĘDY w Y");
+                    Serial.println("2 ERRORS in Y");
                     break;
                 case 3:
-                    Serial.println("1 BŁĄD w X");
+                    Serial.println("1 ERROR in X");
                     break;
                 case 4:
-                    Serial.println("1 BŁĄD w X + 1 BŁĄD w Y");
+                    Serial.println("1 ERROR in X + 1 ERROR in Y");
                     break;
                 case 5:
-                    Serial.println("2 BŁĘDY w X");
+                    Serial.println("2 ERRORS in X");
                     break;
             }
             Serial.println(
-                "═══════════════════════════════════════════════════════");
+                "=======================================================");
             Serial.println();
             Serial.println(
-                "⏳ Czekam 10 sekund przed rozpoczęciem transmisji...");
+                "Waiting 10 seconds before starting transmission...");
             Serial.println();
             delay(10000);
 
-            Serial.println("🚀 START - Wysyłanie 1000 wiadomości...");
+            Serial.println("START - Sending 1000 messages...");
             Serial.println();
         } else {
-            Serial.println("❌ Nieprawidłowy tryb! Wprowadź liczbę od 0 do 5:");
+            Serial.println("Invalid mode! Enter number from 0 to 5:");
         }
     }
 
-    // Wysyłaj wiadomości jeśli test się rozpoczął i nie zakończył
+    // Send messages if test started and not completed
     if (test_started && !test_completed) {
         send_transmission();
         messages_sent++;
 
-        // Wyświetl postęp co 100 wiadomości
+        // Display progress every 100 messages
         if (messages_sent % 100 == 0) {
-            Serial.print("📊 Postęp: ");
+            Serial.print("Progress: ");
             Serial.print(messages_sent);
-            Serial.println("/1000 wiadomości");
+            Serial.println("/1000 messages");
         }
 
-        // Zakończ po 1000 wiadomościach
+        // Complete after 1000 messages
         if (messages_sent >= MESSAGES_PER_TEST) {
             test_completed = true;
             Serial.println();
             Serial.println(
-                "═══════════════════════════════════════════════════════");
-            Serial.println("✅ TEST ZAKOŃCZONY");
-            Serial.print("Wysłano ");
+                "=======================================================");
+            Serial.println("TEST COMPLETED");
+            Serial.print("Sent ");
             Serial.print(messages_sent);
-            Serial.println(" wiadomości");
+            Serial.println(" messages");
             Serial.println(
-                "═══════════════════════════════════════════════════════");
+                "=======================================================");
             Serial.println();
-            Serial.println("💤 Oczekiwanie na resetowanie...");
+            Serial.println("Waiting for reset...");
         }
     }
 }
