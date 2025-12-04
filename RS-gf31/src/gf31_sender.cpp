@@ -15,7 +15,11 @@ int coeffs[MAX_COEFFS] = {5, 7, 3, 2};
 // 3 = 1 błąd w x
 // 4 = 1 błąd w x i 1 błąd w y
 // 5 = 2 błędy w x
-int transmission_mode = 0;
+int transmission_mode = 0;  // Wybierany przez użytkownika
+const int MESSAGES_PER_TEST = 1000;
+int messages_sent = 0;
+bool test_started = false;
+bool test_completed = false;
 
 int poly_eval(int x) {
     int result = 0;
@@ -235,17 +239,21 @@ void send_transmission() {
         Serial.println(((x_values[i] << 5) | y_values[i]), HEX);
 
         send_point(x_values[i], y_values[i]);
-        delay(500);
+        // Brak delay - wysyłaj tak szybko jak możliwe
     }
 }
 
 void setup() {
     Serial.begin(115200);
     softSerial.begin(9600);
-    randomSeed(analogRead(0));  // Inicjalizacja generatora liczb losowych
+    randomSeed(analogRead(0));
     delay(2000);
-    Serial.println("=== GF(31) SENDER START - ROZSZERZONE TESTY ===");
-    Serial.println("Cykl transmisji co 10s:");
+
+    Serial.println("═══════════════════════════════════════════════════════");
+    Serial.println("    GF(31) SENDER - TEST 1000 WIADOMOŚCI");
+    Serial.println("═══════════════════════════════════════════════════════");
+    Serial.println();
+    Serial.println("Dostępne tryby testowe:");
     Serial.println("  0: DOBRA (bez błędów)");
     Serial.println("  1: 1 BŁĄD w Y");
     Serial.println("  2: 2 BŁĘDY w Y");
@@ -253,69 +261,90 @@ void setup() {
     Serial.println("  4: 1 BŁĄD w X + 1 BŁĄD w Y");
     Serial.println("  5: 2 BŁĘDY w X");
     Serial.println();
+    Serial.println("Wprowadź numer trybu (0-5) i naciśnij Enter:");
 }
 
 void loop() {
-    // Wyświetl nagłówek dla aktualnej transmisji
-    Serial.println("=============================================");
-    Serial.print("TRYB ");
-    Serial.print(transmission_mode);
-    Serial.print(": ");
-    switch (transmission_mode) {
-        case 0:
-            Serial.println("✓✓✓ TRANSMISJA POPRAWNA (bez błędów)");
-            break;
-        case 1:
-            Serial.println("⚠️  TRANSMISJA Z 1 BŁĘDEM W Y");
-            break;
-        case 2:
-            Serial.println("❌❌ TRANSMISJA Z 2 BŁĘDAMI W Y");
-            break;
-        case 3:
-            Serial.println("⚠️  TRANSMISJA Z 1 BŁĘDEM W X");
-            break;
-        case 4:
-            Serial.println("❌❌ TRANSMISJA Z 1 BŁĘDEM W X i 1 W Y");
-            break;
-        case 5:
-            Serial.println("❌❌❌ TRANSMISJA Z 2 BŁĘDAMI W X");
-            break;
+    // Czekaj na wybór trybu przez użytkownika
+    if (!test_started && Serial.available() > 0) {
+        int input = Serial.read();
+
+        // Odczytaj resztę z bufora
+        while (Serial.available() > 0) {
+            Serial.read();
+        }
+
+        if (input >= '0' && input <= '5') {
+            transmission_mode = input - '0';
+            test_started = true;
+
+            Serial.println();
+            Serial.println(
+                "═══════════════════════════════════════════════════════");
+            Serial.print("Wybrany tryb: ");
+            Serial.print(transmission_mode);
+            Serial.print(" - ");
+            switch (transmission_mode) {
+                case 0:
+                    Serial.println("DOBRA (bez błędów)");
+                    break;
+                case 1:
+                    Serial.println("1 BŁĄD w Y");
+                    break;
+                case 2:
+                    Serial.println("2 BŁĘDY w Y");
+                    break;
+                case 3:
+                    Serial.println("1 BŁĄD w X");
+                    break;
+                case 4:
+                    Serial.println("1 BŁĄD w X + 1 BŁĄD w Y");
+                    break;
+                case 5:
+                    Serial.println("2 BŁĘDY w X");
+                    break;
+            }
+            Serial.println(
+                "═══════════════════════════════════════════════════════");
+            Serial.println();
+            Serial.println(
+                "⏳ Czekam 10 sekund przed rozpoczęciem transmisji...");
+            Serial.println();
+            delay(10000);
+
+            Serial.println("🚀 START - Wysyłanie 1000 wiadomości...");
+            Serial.println();
+        } else {
+            Serial.println("❌ Nieprawidłowy tryb! Wprowadź liczbę od 0 do 5:");
+        }
     }
-    Serial.println("=============================================");
 
-    // Wyślij transmisję
-    send_transmission();
+    // Wysyłaj wiadomości jeśli test się rozpoczął i nie zakończył
+    if (test_started && !test_completed) {
+        send_transmission();
+        messages_sent++;
 
-    Serial.println("\n=== Transmission complete ===");
+        // Wyświetl postęp co 100 wiadomości
+        if (messages_sent % 100 == 0) {
+            Serial.print("📊 Postęp: ");
+            Serial.print(messages_sent);
+            Serial.println("/1000 wiadomości");
+        }
 
-    // Przełącz na kolejny tryb (0 -> 1 -> 2 -> 3 -> 4 -> 5 -> 0 -> ...)
-    transmission_mode = (transmission_mode + 1) % 6;
-
-    // Czekaj 10 sekund przed następną transmisją
-    Serial.print("\n⏳ Następna transmisja za 10 sekund (tryb ");
-    Serial.print(transmission_mode);
-    Serial.print(": ");
-    switch (transmission_mode) {
-        case 0:
-            Serial.println("DOBRA)...");
-            break;
-        case 1:
-            Serial.println("1 BŁĄD W Y)...");
-            break;
-        case 2:
-            Serial.println("2 BŁĘDY W Y)...");
-            break;
-        case 3:
-            Serial.println("1 BŁĄD W X)...");
-            break;
-        case 4:
-            Serial.println("1 BŁĄD W X + 1 W Y)...");
-            break;
-        case 5:
-            Serial.println("2 BŁĘDY W X)...");
-            break;
+        // Zakończ po 1000 wiadomościach
+        if (messages_sent >= MESSAGES_PER_TEST) {
+            test_completed = true;
+            Serial.println();
+            Serial.println(
+                "═══════════════════════════════════════════════════════");
+            Serial.println("✅ TEST ZAKOŃCZONY");
+            Serial.print("Wysłano ");
+            Serial.print(messages_sent);
+            Serial.println(" wiadomości");
+            Serial.println(
+                "═══════════════════════════════════════════════════════");
+            Serial.println();
+            Serial.println("💤 Oczekiwanie na resetowanie...");
+        }
     }
-    Serial.println();
-
-    delay(10000);  // 10 sekund
 }

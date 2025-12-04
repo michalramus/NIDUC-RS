@@ -14,8 +14,130 @@ int count = 0;
 
 // Statystyki
 int total_transmissions = 0;
-int successful_corrections = 0;
-int failed_corrections = 0;
+int clean_transmissions = 0;      // Bez błędów
+int corrected_transmissions = 0;  // 1 błąd skorygowany
+int failed_corrections = 0;       // 2+ błędy, nie można skorygować
+
+const int MESSAGES_PER_TEST = 1000;
+bool test_in_progress = false;
+bool test_completed = false;
+unsigned long first_message_time = 0;
+
+void print_test_summary() {
+    unsigned long test_duration =
+        (millis() - first_message_time) / 1000;  // w sekundach
+
+    Serial.println("\n\n");
+    Serial.println(
+        "═════════════════════════════════════════════════════════════════════"
+        "═");
+    Serial.println("              PODSUMOWANIE TESTU - 1000 WIADOMOŚCI");
+    Serial.println(
+        "═════════════════════════════════════════════════════════════════════"
+        "═");
+    Serial.println();
+
+    Serial.println(
+        "╔═══════════════════════════════════════════════════════════════════"
+        "╗");
+    Serial.println(
+        "║                         WYNIKI TESTU                              "
+        "║");
+    Serial.println(
+        "╠═════════════════════════════════╦═════════════════════════════════"
+        "╣");
+    Serial.println(
+        "║ Kategoria                       ║  Liczba        Procent      ║");
+    Serial.println(
+        "╠═════════════════════════════════╬═════════════════════════════════"
+        "╣");
+
+    // Oblicz procenty
+    float clean_percent = (clean_transmissions * 100.0) / MESSAGES_PER_TEST;
+    float corrected_percent =
+        (corrected_transmissions * 100.0) / MESSAGES_PER_TEST;
+    float failed_percent = (failed_corrections * 100.0) / MESSAGES_PER_TEST;
+    float success_percent =
+        ((clean_transmissions + corrected_transmissions) * 100.0) /
+        MESSAGES_PER_TEST;
+
+    // OK (czyste)
+    Serial.print("║ ✓ OK (bez błędów)             ║  ");
+    if (clean_transmissions < 10)
+        Serial.print("  ");
+    else if (clean_transmissions < 100)
+        Serial.print(" ");
+    Serial.print(clean_transmissions);
+    Serial.print("/1000    ");
+    if (clean_percent < 10) Serial.print(" ");
+    Serial.print(clean_percent, 1);
+    Serial.println("%      ║");
+
+    // CORRECTED (skorygowane)
+    Serial.print("║ ✓ CORRECTED (1 błąd)          ║  ");
+    if (corrected_transmissions < 10)
+        Serial.print("  ");
+    else if (corrected_transmissions < 100)
+        Serial.print(" ");
+    Serial.print(corrected_transmissions);
+    Serial.print("/1000    ");
+    if (corrected_percent < 10) Serial.print(" ");
+    Serial.print(corrected_percent, 1);
+    Serial.println("%      ║");
+
+    // DETECTED (nie skorygowane)
+    Serial.print("║ ❌ DETECTED (2+ błędy)         ║  ");
+    if (failed_corrections < 10)
+        Serial.print("  ");
+    else if (failed_corrections < 100)
+        Serial.print(" ");
+    Serial.print(failed_corrections);
+    Serial.print("/1000    ");
+    if (failed_percent < 10) Serial.print(" ");
+    Serial.print(failed_percent, 1);
+    Serial.println("%      ║");
+
+    Serial.println(
+        "╠═════════════════════════════════╬═════════════════════════════════"
+        "╣");
+
+    // Całkowity sukces
+    int successful = clean_transmissions + corrected_transmissions;
+    Serial.print("║ 🎯 WSPÓŁCZYNNIK SUKCESU         ║  ");
+    if (successful < 10)
+        Serial.print("  ");
+    else if (successful < 100)
+        Serial.print(" ");
+    Serial.print(successful);
+    Serial.print("/1000    ");
+    if (success_percent < 10) Serial.print(" ");
+    Serial.print(success_percent, 1);
+    Serial.println("%      ║");
+
+    Serial.println(
+        "╚═════════════════════════════════╩═════════════════════════════════"
+        "╝");
+    Serial.println();
+
+    // Dodatkowe informacje
+    Serial.println("🕒 Informacje o teście:");
+    Serial.print("   Całkowity czas testu: ");
+    Serial.print(test_duration);
+    Serial.println(" sekund");
+
+    if (test_duration > 0) {
+        Serial.print("   Prędkość: ");
+        Serial.print(MESSAGES_PER_TEST / test_duration);
+        Serial.println(" wiadomości/s");
+    }
+
+    Serial.println();
+    Serial.println(
+        "═════════════════════════════════════════════════════════════════════"
+        "═");
+    Serial.println("💤 Oczekiwanie na resetowanie...");
+    Serial.println();
+}
 
 // Funkcja walidująca zakres współrzędnej x
 bool is_valid_x(int x) { return (x >= 0 && x <= 5); }
@@ -182,7 +304,7 @@ int reed_solomon_decode(Point *pts, int n, int coeffs[], int *error_idx) {
     // Krok 2: Sprawdź czy wszystkie punkty pasują do wielomianu
     if (verify_points(pts, n, coeffs, 3)) {
         Serial.println("✓ Brak błędów - wszystkie punkty poprawne!");
-        successful_corrections++;
+        clean_transmissions++;
         return 0;  // Brak błędów
     }
 
@@ -222,7 +344,7 @@ int reed_solomon_decode(Point *pts, int n, int coeffs[], int *error_idx) {
             }
 
             *error_idx = skip;
-            successful_corrections++;
+            corrected_transmissions++;
             return 1;  // 1 błąd skorygowany
         }
     }
@@ -239,37 +361,44 @@ void setup() {
     Serial.begin(115200);
     softSerial.begin(9600);
     delay(2000);
-    Serial.println("=== GF(31) RECEIVER READY (z korekcją błędów) ===");
-    Serial.println("Możliwości:");
+
+    Serial.println(
+        "═════════════════════════════════════════════════════════════════════"
+        "═");
+    Serial.println("       GF(31) RECEIVER - TEST 1000 WIADOMOŚCI");
+    Serial.println(
+        "═════════════════════════════════════════════════════════════════════"
+        "═");
+    Serial.println();
+    Serial.println("🔍 Funkcje receivera:");
     Serial.println(
         "  - Wykrywanie błędów w x (duplikaty, wartości poza zakresem)");
     Serial.println("  - Wykrywanie błędów w y (niepoprawnę wartości)");
-    Serial.println("  - Korekcja 1 błędu w y");
+    Serial.println("  - Korekcja 1 błędu w y (Reed-Solomon)");
     Serial.println("  - Wykrywanie 2 lub więcej błędów");
+    Serial.println();
+    Serial.println("⏳ Oczekiwanie na pierwszą transmisję...");
     Serial.println();
 }
 
 void loop() {
+    if (test_completed) {
+        // Test zakończony, czekaj na reset
+        return;
+    }
+
     if (softSerial.available()) {
         uint8_t frame = softSerial.read();
         int x = (frame >> 5) & 0x07;
         int y = frame & 0x1F;
 
-        Serial.print("Frame: 0x");
-        Serial.print(frame, HEX);
-        Serial.print(" -> x=");
-        Serial.print(x);
-        Serial.print(", y=");
-        Serial.print(y);
-
-        // Walidacja
-        if (!is_valid_x(x)) {
-            Serial.print(" ⚠️  [X poza zakresem!]");
+        // Rozpocznij test przy pierwszej wiadomości
+        if (!test_in_progress) {
+            test_in_progress = true;
+            first_message_time = millis();
+            Serial.println("🚀 ROZPOCZĘTO ODBIERANIE WIADOMOŚCI");
+            Serial.println();
         }
-        if (!is_valid_y(y)) {
-            Serial.print(" ⚠️  [Y poza zakresem!]");
-        }
-        Serial.println();
 
         points[count].x = x;
         points[count].y = y;
@@ -277,29 +406,13 @@ void loop() {
 
         if (count == 6) {
             total_transmissions++;
-            Serial.println("\n===============================================");
-            Serial.print("📦 DEKODOWANIE TRANSMISJI #");
-            Serial.println(total_transmissions);
-            Serial.println("===============================================");
-            Serial.println("Odebrane punkty:");
-            for (int i = 0; i < 6; i++) {
-                Serial.print("  [");
-                Serial.print(i);
-                Serial.print("] (");
-                Serial.print(points[i].x);
-                Serial.print(", ");
-                Serial.print(points[i].y);
-                Serial.print(")");
 
-                if (!is_valid_x(points[i].x) || !is_valid_y(points[i].y)) {
-                    Serial.print(" ⚠️  NIEPOPRAWNY");
-                }
-                Serial.println();
+            // Wyświetl postęp co 100 wiadomości
+            if (total_transmissions % 100 == 0) {
+                Serial.print("📊 Postęp: ");
+                Serial.print(total_transmissions);
+                Serial.println("/1000 wiadomości");
             }
-            Serial.println();
-
-            // Analiza rozkładu x
-            analyzeXDistribution(points, 6);
 
             // Sprawdzenie czy są duplikaty x
             if (hasDuplicateX(points, 6)) {
@@ -326,71 +439,39 @@ void loop() {
                     int error_count = reed_solomon_decode(
                         unique_points, unique_count, coeffs, &error_idx);
 
-                    if (error_count <= 1) {
-                        Serial.println("\n📊 Policzony wielomian:");
-                        for (int i = 0; i < MAX_COEFFS; i++) {
-                            Serial.print("  a");
-                            Serial.print(i);
-                            Serial.print(" = ");
-                            Serial.println(coeffs[i]);
-                        }
+                    if (error_count == 0) {
+                        clean_transmissions++;
+                    } else if (error_count == 1) {
+                        corrected_transmissions++;
+                    } else {
+                        failed_corrections++;
                     }
                 } else {
-                    Serial.println(
-                        "❌ Za mało unikalnych punktów do interpolacji "
-                        "(minimum 4)");
+                    failed_corrections++;
                 }
             } else {
                 // Brak duplikatów - dekodowanie z korekcją błędów
-                Serial.println("\n🔍 Analiza poprawności danych...");
-
                 int coeffs[MAX_COEFFS];
                 int error_idx;
                 int error_count =
                     reed_solomon_decode(points, 6, coeffs, &error_idx);
 
                 if (error_count == 0) {
-                    Serial.println("\n📊 Policzony wielomian:");
-                    for (int i = 0; i < MAX_COEFFS; i++) {
-                        Serial.print("  a");
-                        Serial.print(i);
-                        Serial.print(" = ");
-                        Serial.println(coeffs[i]);
-                    }
+                    clean_transmissions++;
                 } else if (error_count == 1) {
-                    Serial.println("\n📊 Policzony wielomian (po korekcji):");
-                    for (int i = 0; i < MAX_COEFFS; i++) {
-                        Serial.print("  a");
-                        Serial.print(i);
-                        Serial.print(" = ");
-                        Serial.println(coeffs[i]);
-                    }
+                    corrected_transmissions++;
                 } else {
-                    Serial.println(
-                        "\n⛔ TRANSMISJA ODRZUCONA - za dużo błędów");
+                    failed_corrections++;
                 }
             }
 
-            Serial.println("=== END FRAME ===");
-
-            // Statystyki
-            Serial.println();
-            Serial.println("📊 STATYSTYKI:");
-            Serial.print("  Całkowite transmisje: ");
-            Serial.println(total_transmissions);
-            Serial.print("  Poprawne/skorygowane: ");
-            Serial.println(successful_corrections);
-            Serial.print("  Nieudane korekcje: ");
-            Serial.println(failed_corrections);
-            if (total_transmissions > 0) {
-                Serial.print("  Współczynnik sukcesu: ");
-                Serial.print((successful_corrections * 100) /
-                             total_transmissions);
-                Serial.println("%");
-            }
-            Serial.println();
-
             count = 0;
+
+            // Sprawdź czy test się zakończył
+            if (total_transmissions >= MESSAGES_PER_TEST) {
+                test_completed = true;
+                print_test_summary();
+            }
         }
     }
 }
