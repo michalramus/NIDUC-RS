@@ -213,6 +213,62 @@ int selectUniquePoints(Point *pts, int n, Point *unique_pts) {
     return unique_count;
 }
 
+// Try to decode with duplicate x by trying different point combinations
+bool tryDecodeWithDuplicates(Point *pts, int n, int decoded_coeffs[]) {
+    // Find which x values are duplicated
+    int x_occurrences[6][6];  // x_occurrences[x][i] = index in pts array
+    int x_counts[6] = {0, 0, 0, 0, 0, 0};
+
+    for (int i = 0; i < n; i++) {
+        int x = pts[i].x;
+        if (x >= 0 && x <= 5) {
+            x_occurrences[x][x_counts[x]] = i;
+            x_counts[x]++;
+        }
+    }
+
+    // Count total combinations to try
+    int total_combinations = 1;
+    for (int x = 0; x < 6; x++) {
+        if (x_counts[x] > 1) {
+            total_combinations *= x_counts[x];
+        }
+    }
+
+    // Try each combination
+    for (int combo = 0; combo < total_combinations; combo++) {
+        Point test_points[6];
+        int test_count = 0;
+        int combo_temp = combo;
+
+        // Select one point for each x value
+        for (int x = 0; x < 6; x++) {
+            if (x_counts[x] > 0) {
+                int which_occurrence = 0;
+                if (x_counts[x] > 1) {
+                    which_occurrence = combo_temp % x_counts[x];
+                    combo_temp /= x_counts[x];
+                }
+                int idx = x_occurrences[x][which_occurrence];
+                test_points[test_count].x = pts[idx].x;
+                test_points[test_count].y = pts[idx].y;
+                test_count++;
+            }
+        }
+
+        // Try to decode with this combination
+        if (test_count >= 4) {
+            lagrange_interpolate(test_points, 4, decoded_coeffs);
+
+            if (verify_points(test_points, test_count, decoded_coeffs, 3)) {
+                return true;  // Successfully decoded
+            }
+        }
+    }
+
+    return false;  // All combinations failed
+}
+
 void lagrange_interpolate(Point *pts, int n, int coeffs[]) {
     for (int i = 0; i < n; i++) coeffs[i] = 0;
 
@@ -393,28 +449,14 @@ void loop() {
 
             // Check for duplicate x values
             if (hasDuplicateX(points, 6)) {
-                // X duplicates detected - select unique points and try to
-                // decode
-                Point unique_points[6];
-                int unique_count = selectUniquePoints(points, 6, unique_points);
-
-                if (unique_count >= 4) {
-                    // Try to interpolate polynomial with unique points
-                    lagrange_interpolate(unique_points, 4, decoded_coeffs);
-
-                    // Check if the polynomial fits all unique points
-                    if (verify_points(unique_points, unique_count,
-                                      decoded_coeffs, 3)) {
-                        // Successfully recreated polynomial despite x
-                        // duplicates
-                        corrected_transmissions++;
-                        is_corrected = true;
-                    } else {
-                        // Unable to recreate valid polynomial
-                        failed_corrections++;
-                    }
+                // X duplicates detected - try all possible combinations of
+                // points
+                if (tryDecodeWithDuplicates(points, 6, decoded_coeffs)) {
+                    // Successfully recreated polynomial despite x duplicates
+                    corrected_transmissions++;
+                    is_corrected = true;
                 } else {
-                    // Not enough unique points
+                    // Unable to recreate valid polynomial with any combination
                     failed_corrections++;
                 }
             } else {
