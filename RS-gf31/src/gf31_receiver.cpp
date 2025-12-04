@@ -165,6 +165,10 @@ bool is_valid_y(int y) {
     return (y >= 0 && y < MOD);  // y must be in range [0, 30]
 }
 
+// Forward declarations
+void lagrange_interpolate(Point *pts, int n, int coeffs[]);
+bool verify_points(Point *pts, int n, int coeffs[], int degree);
+
 // Check if there are duplicate x values
 bool hasDuplicateX(Point *pts, int n) {
     for (int i = 0; i < n; i++) {
