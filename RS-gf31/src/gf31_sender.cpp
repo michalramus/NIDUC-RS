@@ -68,6 +68,12 @@ void send_transmission() {
         y_values[x] = poly_eval(x);
     }
 
+    // First, send the 4 original data coefficients (pure data without encoding)
+    for (int i = 0; i < MAX_COEFFS; i++) {
+        uint8_t data_byte = coeffs[i] & 0x1F;  // 5 bits for value in GF(31)
+        softSerial.write(data_byte);
+    }
+
     // Introduce errors based on mode
     if (transmission_mode == 1) {
         // 1 error in y - at random position
@@ -186,10 +192,9 @@ void loop() {
             Serial.println(
                 "=======================================================");
             Serial.println();
-            Serial.println(
-                "Waiting 10 seconds before starting transmission...");
+            Serial.println("Waiting 1 second before starting transmission...");
             Serial.println();
-            delay(10000);
+            delay(1000);
 
             Serial.println("START - Sending 1000 messages...");
             Serial.println();

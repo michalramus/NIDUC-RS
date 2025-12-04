@@ -11,12 +11,22 @@ struct Point {
 };
 Point points[6];
 int count = 0;
+int original_data[MAX_COEFFS];  // Original data coefficients
+int data_count = 0;
 
 // Statistics
 int total_transmissions = 0;
 int clean_transmissions = 0;      // No errors
 int corrected_transmissions = 0;  // 1 error corrected
 int failed_corrections = 0;       // 2+ errors, cannot correct
+int correct_corrections = 0;      // Successfully corrected to original data
+int incorrect_corrections = 0;    // Corrected but to wrong data
+
+// Store one example of incorrect correction
+bool has_incorrect_example = false;
+int example_original[MAX_COEFFS];
+Point example_points[6];
+int example_decoded[MAX_COEFFS];
 
 const int MESSAGES_PER_TEST = 1000;
 bool test_in_progress = false;
@@ -69,6 +79,65 @@ void print_test_summary() {
     Serial.print("/1000  (");
     Serial.print(success_percent, 1);
     Serial.println("%)");
+
+    // Correction accuracy
+    Serial.println();
+    Serial.println("CORRECTION ACCURACY:");
+    Serial.print("  Correctly corrected:   ");
+    Serial.print(correct_corrections);
+    Serial.print("/");
+    Serial.print(corrected_transmissions);
+    if (corrected_transmissions > 0) {
+        float correct_percent =
+            (correct_corrections * 100.0) / corrected_transmissions;
+        Serial.print("  (");
+        Serial.print(correct_percent, 1);
+        Serial.println("%)");
+    } else {
+        Serial.println();
+    }
+
+    Serial.print("  Incorrectly corrected: ");
+    Serial.print(incorrect_corrections);
+    Serial.print("/");
+    Serial.print(corrected_transmissions);
+    if (corrected_transmissions > 0) {
+        float incorrect_percent =
+            (incorrect_corrections * 100.0) / corrected_transmissions;
+        Serial.print("  (");
+        Serial.print(incorrect_percent, 1);
+        Serial.println("%)");
+    } else {
+        Serial.println();
+    }
+
+    // Show example of incorrect correction
+    if (has_incorrect_example) {
+        Serial.println();
+        Serial.println("EXAMPLE OF INCORRECT CORRECTION:");
+        Serial.print("  Original data:    [");
+        for (int i = 0; i < MAX_COEFFS; i++) {
+            Serial.print(example_original[i]);
+            if (i < MAX_COEFFS - 1) Serial.print(", ");
+        }
+        Serial.println("]");
+
+        Serial.println("  Received points:");
+        for (int i = 0; i < 6; i++) {
+            Serial.print("    (");
+            Serial.print(example_points[i].x);
+            Serial.print(", ");
+            Serial.print(example_points[i].y);
+            Serial.println(")");
+        }
+
+        Serial.print("  Decoded data:     [");
+        for (int i = 0; i < MAX_COEFFS; i++) {
+            Serial.print(example_decoded[i]);
+            if (i < MAX_COEFFS - 1) Serial.print(", ");
+        }
+        Serial.println("]");
+    }
 
     Serial.println();
     Serial.println("TEST INFO:");
@@ -284,8 +353,6 @@ void loop() {
 
     if (softSerial.available()) {
         uint8_t frame = softSerial.read();
-        int x = (frame >> 5) & 0x07;
-        int y = frame & 0x1F;
 
         // Start test on first message
         if (!test_in_progress) {
@@ -294,6 +361,17 @@ void loop() {
             Serial.println("STARTED RECEIVING MESSAGES");
             Serial.println();
         }
+
+        // First receive 4 bytes of original data
+        if (data_count < MAX_COEFFS) {
+            original_data[data_count] = frame & 0x1F;
+            data_count++;
+            return;
+        }
+
+        // Then receive 6 encoded points
+        int x = (frame >> 5) & 0x07;
+        int y = frame & 0x1F;
 
         points[count].x = x;
         points[count].y = y;
@@ -309,6 +387,10 @@ void loop() {
                 Serial.println("/1000 messages");
             }
 
+            int decoded_coeffs[MAX_COEFFS];
+            bool is_corrected = false;
+            bool is_ok = false;
+
             // Check for duplicate x values
             if (hasDuplicateX(points, 6)) {
                 // X duplicates detected - select unique points and try to
@@ -318,14 +400,15 @@ void loop() {
 
                 if (unique_count >= 4) {
                     // Try to interpolate polynomial with unique points
-                    int coeffs[MAX_COEFFS];
-                    lagrange_interpolate(unique_points, 4, coeffs);
+                    lagrange_interpolate(unique_points, 4, decoded_coeffs);
 
                     // Check if the polynomial fits all unique points
-                    if (verify_points(unique_points, unique_count, coeffs, 3)) {
+                    if (verify_points(unique_points, unique_count,
+                                      decoded_coeffs, 3)) {
                         // Successfully recreated polynomial despite x
                         // duplicates
                         corrected_transmissions++;
+                        is_corrected = true;
                     } else {
                         // Unable to recreate valid polynomial
                         failed_corrections++;
@@ -336,15 +419,51 @@ void loop() {
                 }
             } else {
                 // No duplicates - decode with error correction
-                int coeffs[MAX_COEFFS];
                 int error_idx;
                 int error_count =
-                    reed_solomon_decode(points, 6, coeffs, &error_idx);
+                    reed_solomon_decode(points, 6, decoded_coeffs, &error_idx);
 
-                // Result already counted in reed_solomon_decode
+                if (error_count == 0) {
+                    is_ok = true;
+                } else if (error_count == 1) {
+                    is_corrected = true;
+                }
+                // error_count == 2 means failed_corrections already incremented
+            }
+
+            // Compare decoded data with original data
+            if (is_ok || is_corrected) {
+                bool data_matches = true;
+                for (int i = 0; i < MAX_COEFFS; i++) {
+                    if (decoded_coeffs[i] != original_data[i]) {
+                        data_matches = false;
+                        break;
+                    }
+                }
+
+                if (is_corrected) {
+                    if (data_matches) {
+                        correct_corrections++;
+                    } else {
+                        incorrect_corrections++;
+
+                        // Save first example of incorrect correction
+                        if (!has_incorrect_example) {
+                            has_incorrect_example = true;
+                            for (int i = 0; i < MAX_COEFFS; i++) {
+                                example_original[i] = original_data[i];
+                                example_decoded[i] = decoded_coeffs[i];
+                            }
+                            for (int i = 0; i < 6; i++) {
+                                example_points[i] = points[i];
+                            }
+                        }
+                    }
+                }
             }
 
             count = 0;
+            data_count = 0;
 
             // Check if test completed
             if (total_transmissions >= MESSAGES_PER_TEST) {
