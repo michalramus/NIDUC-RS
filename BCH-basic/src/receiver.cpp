@@ -302,8 +302,8 @@ void processTest(int testNum, int errorCount, uint8_t* originalMessage,
         }
     }
 
-    // Optional: print individual test results (comment out for faster tests)
-    if (testNum % 100 == 0 || !messageCorrect) {
+    // Minimal logging for speed - only show every 200 tests or failures
+    if (testNum % 100 == 0 || (!messageCorrect && errorCount <= 2)) {
         Serial.print("Test ");
         Serial.print(testNum);
         Serial.print(": ");
@@ -373,14 +373,17 @@ void loop() {
                 testingActive = false;
                 printStats();
             } else if (line.startsWith("PROGRESS:")) {
-                // Extract progress numbers from sender
+                // Minimal progress logging - only show every 200
                 int slashPos = line.indexOf('/');
                 if (slashPos > 0) {
                     String progressStr =
                         line.substring(9, slashPos);  // After "PROGRESS:"
-                    Serial.print("Progress: ");
-                    Serial.print(progressStr);
-                    Serial.println("/1000 messages");
+                    int progress = progressStr.toInt();
+                    if (progress % 200 == 0) {
+                        Serial.print("Progress: ");
+                        Serial.print(progressStr);
+                        Serial.println("/1000 messages");
+                    }
                 }
             } else if (line.startsWith("TEST:")) {
                 // Parse: TEST:<test_num>:<error_count>
@@ -391,18 +394,32 @@ void loop() {
                     line.substring(firstColon + 1, secondColon).toInt();
                 int errorCount = line.substring(secondColon + 1).toInt();
 
-                // Read original message
+                // Read original message with timeout
                 uint8_t originalMessage[BCH_K];
                 for (int i = 0; i < BCH_K; i++) {
-                    while (!softSerial.available());
-                    originalMessage[i] = softSerial.parseInt();
+                    unsigned long timeout = millis() + 1000;
+                    while (!softSerial.available() && millis() < timeout);
+                    if (millis() >= timeout) {
+                        Serial.println("ERROR: Timeout reading message");
+                        return;
+                    }
+                    // Read line and parse as integer
+                    String val = softSerial.readStringUntil('\n');
+                    originalMessage[i] = val.toInt();
                 }
 
-                // Read received codeword
+                // Read received codeword with timeout
                 uint8_t received[BCH_N];
                 for (int i = 0; i < BCH_N; i++) {
-                    while (!softSerial.available());
-                    received[i] = softSerial.parseInt();
+                    unsigned long timeout = millis() + 1000;
+                    while (!softSerial.available() && millis() < timeout);
+                    if (millis() >= timeout) {
+                        Serial.println("ERROR: Timeout reading codeword");
+                        return;
+                    }
+                    // Read line and parse as integer
+                    String val = softSerial.readStringUntil('\n');
+                    received[i] = val.toInt();
                 }
 
                 // Process the test
