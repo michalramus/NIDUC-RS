@@ -1,6 +1,11 @@
 #include <Arduino.h>
+#include <SoftwareSerial.h>
 
 #include "bch.hpp"
+
+// SoftwareSerial for communication with sender
+// RX, TX pins (RX of receiver connects to TX of sender)
+SoftwareSerial softSerial(D6, D5);  // RX=D6, TX=D5
 
 // BCH parameters - must match sender
 #define BCH_N 15  // Codeword length
@@ -322,6 +327,7 @@ void processTest(int testNum, int errorCount, uint8_t* originalMessage,
 
 void setup() {
     Serial.begin(115200);
+    softSerial.begin(9600);  // Initialize SoftwareSerial at 9600 baud
     while (!Serial);
     delay(1000);
 
@@ -351,8 +357,8 @@ void setup() {
 }
 
 void loop() {
-    if (Serial.available()) {
-        String line = Serial.readStringUntil('\n');
+    if (softSerial.available()) {
+        String line = softSerial.readStringUntil('\n');
         line.trim();
 
         if (line.length() > 0) {
@@ -388,15 +394,15 @@ void loop() {
                 // Read original message
                 uint8_t originalMessage[BCH_K];
                 for (int i = 0; i < BCH_K; i++) {
-                    while (!Serial.available());
-                    originalMessage[i] = Serial.parseInt();
+                    while (!softSerial.available());
+                    originalMessage[i] = softSerial.parseInt();
                 }
 
                 // Read received codeword
                 uint8_t received[BCH_N];
                 for (int i = 0; i < BCH_N; i++) {
-                    while (!Serial.available());
-                    received[i] = Serial.parseInt();
+                    while (!softSerial.available());
+                    received[i] = softSerial.parseInt();
                 }
 
                 // Process the test

@@ -1,6 +1,11 @@
 #include <Arduino.h>
+#include <SoftwareSerial.h>
 
 #include "bch.hpp"
+
+// SoftwareSerial for communication with receiver
+// RX, TX pins (TX of sender connects to RX of receiver)
+SoftwareSerial softSerial(D5, D6);  // RX=D6, TX=D5
 
 // BCH parameters - can be changed to any valid values for GF(2^4)
 #define BCH_N 15  // Codeword length
@@ -120,20 +125,20 @@ void transmitTest(int testNum) {
     // Introduce errors
     introduceErrors(codeword, currentMode, testNum);
 
-    // Send test header: TEST:<test_num>:<error_count>
-    Serial.print("TEST:");
-    Serial.print(testNum);
-    Serial.print(":");
-    Serial.println(errorCount);
+    // Send test header via SoftwareSerial: TEST:<test_num>:<error_count>
+    softSerial.print("TEST:");
+    softSerial.print(testNum);
+    softSerial.print(":");
+    softSerial.println(errorCount);
 
     // Send message (for verification)
     for (int i = 0; i < BCH_K; i++) {
-        Serial.println(message[i]);
+        softSerial.println(message[i]);
     }
 
     // Send codeword
     for (int i = 0; i < BCH_N; i++) {
-        Serial.println(codeword[i]);
+        softSerial.println(codeword[i]);
     }
 }
 
@@ -163,6 +168,7 @@ void printMenu() {
 
 void setup() {
     Serial.begin(115200);
+    softSerial.begin(9600);  // Initialize SoftwareSerial at 9600 baud
     delay(2000);
 
     randomSeed(analogRead(0));  // Initialize random seed
@@ -185,6 +191,9 @@ void loop() {
                 Serial.print(" tests in mode ");
                 Serial.print(input);
                 Serial.println("...");
+
+                // Send start signal to receiver via SoftwareSerial
+                softSerial.println("TESTS_START");
                 Serial.println("TESTS_START");
 
                 testsRunning = true;
@@ -203,6 +212,11 @@ void loop() {
 
             // Progress indicator every 100 tests
             if (testCount % 100 == 0) {
+                softSerial.print("PROGRESS:");
+                softSerial.print(testCount);
+                softSerial.print("/");
+                softSerial.println(NUM_TESTS);
+
                 Serial.print("PROGRESS:");
                 Serial.print(testCount);
                 Serial.print("/");
@@ -212,6 +226,7 @@ void loop() {
             delay(TEST_DELAY);
         } else {
             // Tests complete
+            softSerial.println("TESTS_COMPLETE");
             Serial.println("TESTS_COMPLETE");
             Serial.println();
             Serial.println("All tests transmitted!");
