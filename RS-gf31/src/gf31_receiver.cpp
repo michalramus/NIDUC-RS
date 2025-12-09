@@ -3,7 +3,7 @@
 
 #include "gf31_math.hpp"
 
-SoftwareSerial softSerial(13, 12);  // RX, TX
+SoftwareSerial softSerial(13, 12);  // RX, TX  -  D6, D7
 
 struct Point {
     int x;
@@ -157,121 +157,9 @@ void print_test_summary() {
     Serial.println();
 }
 
-// Validate x coordinate range
-bool is_valid_x(int x) { return (x >= 0 && x <= 5); }
-
-// Validate y coordinate range
-bool is_valid_y(int y) {
-    return (y >= 0 && y < MOD);  // y must be in range [0, 30]
-}
-
 // Forward declarations
 void lagrange_interpolate(Point *pts, int n, int coeffs[]);
 bool verify_points(Point *pts, int n, int coeffs[], int degree);
-
-// Check if there are duplicate x values
-bool hasDuplicateX(Point *pts, int n) {
-    for (int i = 0; i < n; i++) {
-        for (int j = i + 1; j < n; j++) {
-            if (pts[i].x == pts[j].x) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-// Count occurrences of each x value
-void analyzeXDistribution(Point *pts, int n) {
-    int x_count[6] = {0, 0, 0, 0, 0, 0};
-    int out_of_range = 0;
-
-    for (int i = 0; i < n; i++) {
-        if (pts[i].x >= 0 && pts[i].x <= 5) {
-            x_count[pts[i].x]++;
-        } else {
-            out_of_range++;
-        }
-    }
-}
-
-// Select unique points (first occurrence of each x)
-int selectUniquePoints(Point *pts, int n, Point *unique_pts) {
-    int unique_count = 0;
-
-    for (int i = 0; i < n; i++) {
-        bool found = false;
-        for (int j = 0; j < unique_count; j++) {
-            if (unique_pts[j].x == pts[i].x) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            unique_pts[unique_count].x = pts[i].x;
-            unique_pts[unique_count].y = pts[i].y;
-            unique_count++;
-        }
-    }
-
-    return unique_count;
-}
-
-// Try to decode with duplicate x by trying different point combinations
-bool tryDecodeWithDuplicates(Point *pts, int n, int decoded_coeffs[]) {
-    // Find which x values are duplicated
-    int x_occurrences[6][6];  // x_occurrences[x][i] = index in pts array
-    int x_counts[6] = {0, 0, 0, 0, 0, 0};
-
-    for (int i = 0; i < n; i++) {
-        int x = pts[i].x;
-        if (x >= 0 && x <= 5) {
-            x_occurrences[x][x_counts[x]] = i;
-            x_counts[x]++;
-        }
-    }
-
-    // Count total combinations to try
-    int total_combinations = 1;
-    for (int x = 0; x < 6; x++) {
-        if (x_counts[x] > 1) {
-            total_combinations *= x_counts[x];
-        }
-    }
-
-    // Try each combination
-    for (int combo = 0; combo < total_combinations; combo++) {
-        Point test_points[6];
-        int test_count = 0;
-        int combo_temp = combo;
-
-        // Select one point for each x value
-        for (int x = 0; x < 6; x++) {
-            if (x_counts[x] > 0) {
-                int which_occurrence = 0;
-                if (x_counts[x] > 1) {
-                    which_occurrence = combo_temp % x_counts[x];
-                    combo_temp /= x_counts[x];
-                }
-                int idx = x_occurrences[x][which_occurrence];
-                test_points[test_count].x = pts[idx].x;
-                test_points[test_count].y = pts[idx].y;
-                test_count++;
-            }
-        }
-
-        // Try to decode with this combination
-        if (test_count >= 4) {
-            lagrange_interpolate(test_points, 4, decoded_coeffs);
-
-            if (verify_points(test_points, test_count, decoded_coeffs, 3)) {
-                return true;  // Successfully decoded
-            }
-        }
-    }
-
-    return false;  // All combinations failed
-}
 
 void lagrange_interpolate(Point *pts, int n, int coeffs[]) {
     for (int i = 0; i < n; i++) coeffs[i] = 0;
@@ -451,30 +339,110 @@ void loop() {
             bool is_corrected = false;
             bool is_ok = false;
 
-            // Check for duplicate x values
-            if (hasDuplicateX(points, 6)) {
-                // X duplicates detected - try all possible combinations of
-                // points
-                if (tryDecodeWithDuplicates(points, 6, decoded_coeffs)) {
-                    // Successfully recreated polynomial despite x duplicates
-                    corrected_transmissions++;
-                    is_corrected = true;
-                } else {
-                    // Unable to recreate valid polynomial with any combination
+            // ===== NOWA LOGIKA DETEKCJI DUPLIKATÓW X =====
+            
+            // Sprawdź czy są duplikaty X
+            int x_count[6] = {0, 0, 0, 0, 0, 0};
+            int duplicates = 0;
+            
+            for (int i = 0; i < 6; i++) {
+                if (points[i].x >= 0 && points[i].x <= 5) {
+                    x_count[points[i].x]++;
+                }
+            }
+            
+            for (int x = 0; x < 6; x++) {
+                if (x_count[x] > 1) {
+                    duplicates += (x_count[x] - 1);
+                }
+            }
+            
+            // Jeśli są 2 lub więcej duplikatów - nie da się poprawić
+            if (duplicates >= 2) {
+                failed_corrections++;
+                count = 0;
+                data_count = 0;
+                
+                if (total_transmissions >= MESSAGES_PER_TEST) {
+                    test_completed = true;
+                    print_test_summary();
+                }
+                return;
+            }
+            
+            // Jeśli jest 1 duplikat - spróbuj wybrać prawidłowy punkt
+            if (duplicates == 1) {
+                // Znajdź który X jest zduplikowany
+                int dup_x = -1;
+                for (int x = 0; x < 6; x++) {
+                    if (x_count[x] > 1) {
+                        dup_x = x;
+                        break;
+                    }
+                }
+                
+                // Znajdź oba punkty z tym X
+                int dup_indices[2];
+                int dup_found = 0;
+                for (int i = 0; i < 6; i++) {
+                    if (points[i].x == dup_x) {
+                        dup_indices[dup_found++] = i;
+                    }
+                }
+                
+                // Spróbuj obie możliwości - która daje poprawny wielomian?
+                bool found_correct = false;
+                
+                for (int try_keep = 0; try_keep < 2; try_keep++) {
+                    Point test_points[6];
+                    int test_idx = 0;
+                    
+                    // Kopiuj wszystkie punkty poza jednym duplikatem
+                    for (int i = 0; i < 6; i++) {
+                        if (i != dup_indices[1 - try_keep]) {  // Pomiń drugi duplikat
+                            test_points[test_idx++] = points[i];
+                        }
+                    }
+                    
+                    // Interpoluj przez 4 punkty
+                    int test_coeffs[MAX_COEFFS];
+                    lagrange_interpolate(test_points, 4, test_coeffs);
+                    
+                    // Sprawdź czy wszystkie 5 punktów pasują
+                    if (verify_points(test_points, 5, test_coeffs, 3)) {
+                        // Znaleziono poprawny wielomian!
+                        for (int i = 0; i < MAX_COEFFS; i++) {
+                            decoded_coeffs[i] = test_coeffs[i];
+                        }
+                        found_correct = true;
+                        is_corrected = true;
+                        corrected_transmissions++;
+                        break;
+                    }
+                }
+                
+                if (!found_correct) {
+                    // Nie udało się znaleźć poprawnego wielomianu
                     failed_corrections++;
+                    count = 0;
+                    data_count = 0;
+                    
+                    if (total_transmissions >= MESSAGES_PER_TEST) {
+                        test_completed = true;
+                        print_test_summary();
+                    }
+                    return;
                 }
             } else {
-                // No duplicates - decode with error correction
+                // Brak duplikatów - użyj standardowej metody Reed-Solomon
                 int error_idx;
-                int error_count =
-                    reed_solomon_decode(points, 6, decoded_coeffs, &error_idx);
-
+                int error_count = reed_solomon_decode(points, 6, decoded_coeffs, &error_idx);
+                
                 if (error_count == 0) {
                     is_ok = true;
                 } else if (error_count == 1) {
                     is_corrected = true;
                 }
-                // error_count == 2 means failed_corrections already incremented
             }
 
             // Compare decoded data with original data
