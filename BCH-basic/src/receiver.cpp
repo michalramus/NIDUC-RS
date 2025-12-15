@@ -1,430 +1,160 @@
 #include <Arduino.h>
-#include <SoftwareSerial.h>
 
 #include "bch.hpp"
 
-// SoftwareSerial for communication with sender
-// RX, TX pins (RX of receiver connects to TX of sender)
-SoftwareSerial softSerial(D6, D5);  // RX=D6, TX=D5
-
-// BCH parameters - must match sender
-#define BCH_N 15  // Codeword length
-#define BCH_K 7   // Message length
-#define BCH_T 2   // Error correction capability
-
-// Create BCH instance
-BCH bch(BCH_N, BCH_K, BCH_T);
-
-// Statistics
-struct TestStats {
-    int totalTests;
-    int correctMessages;
-    int correctedMessages;
-    int failedMessages;
-    int errorsByCount[4];  // 0, 1, 2, 3 errors
-    int correctedByCount[4];
-    int failedByCount[4];
-    int correctCorrections;    // Corrections that match original
-    int incorrectCorrections;  // Corrections that don't match original
-    unsigned long startTime;
-    unsigned long endTime;
-};
-
-TestStats stats;
-bool testingActive = false;
-
-// Store example of incorrect correction
-bool hasIncorrectExample = false;
-uint8_t exampleOriginal[BCH_K];
-uint8_t exampleReceived[BCH_N];
-uint8_t exampleDecoded[BCH_K];
-int exampleErrorCount = 0;
-
-void resetStats() {
-    stats.totalTests = 0;
-    stats.correctMessages = 0;
-    stats.correctedMessages = 0;
-    stats.failedMessages = 0;
-    stats.correctCorrections = 0;
-    stats.incorrectCorrections = 0;
-    for (int i = 0; i < 4; i++) {
-        stats.errorsByCount[i] = 0;
-        stats.correctedByCount[i] = 0;
-        stats.failedByCount[i] = 0;
-    }
-    stats.startTime = millis();
-    stats.endTime = 0;
-    hasIncorrectExample = false;
-}
-
-void printStats() {
-    unsigned long duration = (stats.endTime - stats.startTime) / 1000;
-
-    Serial.println("\n\n");
-    Serial.println("=======================================================");
-    Serial.println("           TEST SUMMARY - 1000 MESSAGES");
-    Serial.println("=======================================================");
-    Serial.println();
-
-    // Calculate percentages
-    float clean_percent = (stats.correctMessages * 100.0) / stats.totalTests;
-    float corrected_percent =
-        (stats.correctedMessages * 100.0) / stats.totalTests;
-    float failed_percent = (stats.failedMessages * 100.0) / stats.totalTests;
-    float success_percent =
-        ((stats.correctMessages + stats.correctedMessages) * 100.0) /
-        stats.totalTests;
-
-    // Results
-    Serial.println("RESULTS:");
-    Serial.print("  OK (no errors):        ");
-    Serial.print(stats.correctMessages);
-    Serial.print("/1000  (");
-    Serial.print(clean_percent, 1);
-    Serial.println("%)");
-
-    Serial.print("  CORRECTED (with errors): ");
-    Serial.print(stats.correctedMessages);
-    Serial.print("/1000  (");
-    Serial.print(corrected_percent, 1);
-    Serial.println("%)");
-
-    Serial.print("  DETECTED (uncorrectable): ");
-    Serial.print(stats.failedMessages);
-    Serial.print("/1000  (");
-    Serial.print(failed_percent, 1);
-    Serial.println("%)");
-
-    Serial.println();
-    Serial.print("SUCCESS RATE:            ");
-    int successful = stats.correctMessages + stats.correctedMessages;
-    Serial.print(successful);
-    Serial.print("/1000  (");
-    Serial.print(success_percent, 1);
-    Serial.println("%)");
-
-    // Breakdown by error count
-    Serial.println();
-    Serial.println("BREAKDOWN BY ERROR COUNT:");
-    for (int i = 0; i < 4; i++) {
-        if (stats.errorsByCount[i] > 0) {
-            Serial.print("  ");
-            Serial.print(i);
-            Serial.print(" error(s): ");
-            Serial.print(stats.errorsByCount[i]);
-            Serial.print(" messages");
-            Serial.println();
-
-            // Corrected
-            if (stats.correctedByCount[i] > 0) {
-                Serial.print("    Corrected:   ");
-                Serial.print(stats.correctedByCount[i]);
-                Serial.print("/");
-                Serial.print(stats.errorsByCount[i]);
-                Serial.print("  (");
-                Serial.print((stats.correctedByCount[i] * 100.0) /
-                                 stats.errorsByCount[i],
-                             1);
-                Serial.println("%)");
-            }
-
-            // Failed
-            if (stats.failedByCount[i] > 0) {
-                Serial.print("    Failed:      ");
-                Serial.print(stats.failedByCount[i]);
-                Serial.print("/");
-                Serial.print(stats.errorsByCount[i]);
-                Serial.print("  (");
-                Serial.print(
-                    (stats.failedByCount[i] * 100.0) / stats.errorsByCount[i],
-                    1);
-                Serial.println("%)");
-            }
-        }
-    }
-
-    // Correction accuracy for messages with errors
-    Serial.println();
-    Serial.println("CORRECTION ACCURACY:");
-    int totalWithErrors = stats.totalTests - stats.correctMessages;
-    if (totalWithErrors > 0) {
-        Serial.print("  Messages with errors:  ");
-        Serial.print(totalWithErrors);
-        Serial.println();
-
-        Serial.print("  Successfully corrected: ");
-        Serial.print(stats.correctedMessages);
-        Serial.print("/");
-        Serial.print(totalWithErrors);
-        Serial.print("  (");
-        Serial.print((stats.correctedMessages * 100.0) / totalWithErrors, 1);
-        Serial.println("%)");
-
-        Serial.print("  Failed to correct:     ");
-        Serial.print(stats.failedMessages);
-        Serial.print("/");
-        Serial.print(totalWithErrors);
-        Serial.print("  (");
-        Serial.print((stats.failedMessages * 100.0) / totalWithErrors, 1);
-        Serial.println("%)");
-
-        // Breakdown of corrections
-        if (stats.correctedMessages > 0) {
-            Serial.println();
-            Serial.print("  Correctly corrected:   ");
-            Serial.print(stats.correctCorrections);
-            Serial.print("/");
-            Serial.print(stats.correctedMessages);
-            Serial.print("  (");
-            Serial.print(
-                (stats.correctCorrections * 100.0) / stats.correctedMessages,
-                1);
-            Serial.println("%)");
-
-            Serial.print("  Incorrectly corrected: ");
-            Serial.print(stats.incorrectCorrections);
-            Serial.print("/");
-            Serial.print(stats.correctedMessages);
-            Serial.print("  (");
-            Serial.print(
-                (stats.incorrectCorrections * 100.0) / stats.correctedMessages,
-                1);
-            Serial.println("%)");
-        }
-    } else {
-        Serial.println("  No messages with errors received");
-    }
-
-    // Show example of incorrect correction
-    if (hasIncorrectExample) {
-        Serial.println();
-        Serial.println("EXAMPLE OF INCORRECT CORRECTION:");
-        Serial.print("  Original message:  [");
-        for (int i = 0; i < BCH_K; i++) {
-            Serial.print(exampleOriginal[i]);
-            if (i < BCH_K - 1) Serial.print(", ");
-        }
-        Serial.println("]");
-
-        Serial.print("  Received codeword: [");
-        for (int i = 0; i < BCH_N; i++) {
-            Serial.print(exampleReceived[i]);
-            if (i < BCH_N - 1) Serial.print(", ");
-        }
-        Serial.print("]  (");
-        Serial.print(exampleErrorCount);
-        Serial.println(" errors)");
-
-        Serial.print("  Decoded message:   [");
-        for (int i = 0; i < BCH_K; i++) {
-            Serial.print(exampleDecoded[i]);
-            if (i < BCH_K - 1) Serial.print(", ");
-        }
-        Serial.println("]");
-    }
-
-    // Test info
-    Serial.println();
-    Serial.println("TEST INFO:");
-    Serial.print("  Total test time: ");
-    Serial.print(duration);
-    Serial.println(" seconds");
-
-    if (duration > 0) {
-        Serial.print("  Speed: ");
-        Serial.print(stats.totalTests / duration);
-        Serial.println(" messages/s");
-    }
-
-    Serial.print("  BCH code: BCH(");
-    Serial.print(bch.getN());
-    Serial.print(",");
-    Serial.print(bch.getK());
-    Serial.print(",");
-    Serial.print(bch.getT());
-    Serial.print(") - can correct up to ");
-    Serial.print(bch.getT());
-    Serial.println(" errors");
-
-    Serial.println();
-    Serial.println("=======================================================");
-    Serial.println("Waiting for reset...");
-    Serial.println();
-}
-
-bool compareMessages(uint8_t* msg1, uint8_t* msg2, int length) {
-    for (int i = 0; i < length; i++) {
-        if (msg1[i] != msg2[i]) return false;
-    }
-    return true;
-}
-
-void processTest(int testNum, int errorCount, uint8_t* originalMessage,
-                 uint8_t* received) {
-    uint8_t decoded[BCH_K];
-    bool success = bch.decode(received, decoded);
-
-    // Verify if decoded message matches original
-    bool messageCorrect = compareMessages(originalMessage, decoded, BCH_K);
-
-    stats.totalTests++;
-    stats.errorsByCount[errorCount]++;
-
-    if (errorCount == 0 && messageCorrect) {
-        stats.correctMessages++;
-        stats.correctedByCount[0]++;
-    } else if (messageCorrect) {
-        stats.correctedMessages++;
-        stats.correctedByCount[errorCount]++;
-        stats.correctCorrections++;
-    } else {
-        // Check if decoder attempted correction but got wrong result
-        if (success && errorCount > 0) {
-            stats.correctedMessages++;
-            stats.correctedByCount[errorCount]++;
-            stats.incorrectCorrections++;
-
-            // Store first example of incorrect correction
-            if (!hasIncorrectExample) {
-                hasIncorrectExample = true;
-                for (int i = 0; i < BCH_K; i++) {
-                    exampleOriginal[i] = originalMessage[i];
-                    exampleDecoded[i] = decoded[i];
-                }
-                for (int i = 0; i < BCH_N; i++) {
-                    exampleReceived[i] = received[i];
-                }
-                exampleErrorCount = errorCount;
-            }
-        } else {
-            stats.failedMessages++;
-            stats.failedByCount[errorCount]++;
-        }
-    }
-
-    // Minimal logging for speed - only show every 200 tests or failures
-    if (testNum % 100 == 0 || (!messageCorrect && errorCount <= 2)) {
-        Serial.print("Test ");
-        Serial.print(testNum);
-        Serial.print(": ");
-        Serial.print(errorCount);
-        Serial.print(" error(s) - ");
-        if (messageCorrect) {
-            if (errorCount == 0) {
-                Serial.println("CORRECT");
-            } else {
-                Serial.println("CORRECTED OK");
-            }
-        } else {
-            if (success && errorCount > 0) {
-                Serial.println("CORRECTED WRONG");
-            } else {
-                Serial.println("FAILED");
-            }
-        }
-    }
-}
-
 void setup() {
     Serial.begin(115200);
-    softSerial.begin(9600);  // Initialize SoftwareSerial at 9600 baud
-    while (!Serial);
-    delay(1000);
+    while (!Serial) delay(10);
 
-    Serial.println("=======================================================");
-    Serial.println("       BCH RECEIVER - 1000 MESSAGE TEST");
-    Serial.println("=======================================================");
-    Serial.println();
-    Serial.print("BCH(");
-    Serial.print(bch.getN());
-    Serial.print(",");
-    Serial.print(bch.getK());
-    Serial.print(",");
-    Serial.print(bch.getT());
-    Serial.println(") configured");
-    Serial.println();
-    Serial.println("Receiver functions:");
-    Serial.println("  - Detect errors in transmitted codewords");
-    Serial.print("  - Correct up to ");
-    Serial.print(bch.getT());
-    Serial.println(" errors using BCH decoding");
-    Serial.println("  - Verify decoded message against original");
-    Serial.println();
-    Serial.println("Waiting for first transmission...");
-    Serial.println();
+    Serial.println("\n=== BCH Decoder Demo (Receiver) ===\n");
 
-    resetStats();
-}
+    // Create BCH encoder and decoder for GF(2^4) with t=2 error correction
+    BCHEncoder encoder(4, 2);  // m=4, t=2
 
-void loop() {
-    if (softSerial.available()) {
-        String line = softSerial.readStringUntil('\n');
-        line.trim();
-
-        if (line.length() > 0) {
-            // Check for control messages
-            if (line.equals("TESTS_START")) {
-                Serial.println("STARTED RECEIVING MESSAGES");
-                Serial.println();
-                resetStats();
-                testingActive = true;
-            } else if (line.equals("TESTS_COMPLETE")) {
-                stats.endTime = millis();
-                testingActive = false;
-                printStats();
-            } else if (line.startsWith("PROGRESS:")) {
-                // Minimal progress logging - only show every 200
-                int slashPos = line.indexOf('/');
-                if (slashPos > 0) {
-                    String progressStr =
-                        line.substring(9, slashPos);  // After "PROGRESS:"
-                    int progress = progressStr.toInt();
-                    if (progress % 200 == 0) {
-                        Serial.print("Progress: ");
-                        Serial.print(progressStr);
-                        Serial.println("/1000 messages");
-                    }
-                }
-            } else if (line.startsWith("TEST:")) {
-                // Parse: TEST:<test_num>:<error_count>
-                int firstColon = line.indexOf(':');
-                int secondColon = line.indexOf(':', firstColon + 1);
-
-                int testNum =
-                    line.substring(firstColon + 1, secondColon).toInt();
-                int errorCount = line.substring(secondColon + 1).toInt();
-
-                // Read original message with timeout
-                uint8_t originalMessage[BCH_K];
-                for (int i = 0; i < BCH_K; i++) {
-                    unsigned long timeout = millis() + 1000;
-                    while (!softSerial.available() && millis() < timeout);
-                    if (millis() >= timeout) {
-                        Serial.println("ERROR: Timeout reading message");
-                        return;
-                    }
-                    // Read line and parse as integer
-                    String val = softSerial.readStringUntil('\n');
-                    originalMessage[i] = val.toInt();
-                }
-
-                // Read received codeword with timeout
-                uint8_t received[BCH_N];
-                for (int i = 0; i < BCH_N; i++) {
-                    unsigned long timeout = millis() + 1000;
-                    while (!softSerial.available() && millis() < timeout);
-                    if (millis() >= timeout) {
-                        Serial.println("ERROR: Timeout reading codeword");
-                        return;
-                    }
-                    // Read line and parse as integer
-                    String val = softSerial.readStringUntil('\n');
-                    received[i] = val.toInt();
-                }
-
-                // Process the test
-                processTest(testNum, errorCount, originalMessage, received);
-            }
-        }
+    // Initialize the encoder
+    if (!encoder.initialize()) {
+        Serial.println("Failed to initialize BCH encoder");
+        return;
     }
+
+    encoder.printCodeInfo();
+
+    // Create decoder
+    BCHDecoder decoder(encoder);
+
+    // Example: Encode a message
+    int k = encoder.getK();
+    int n = encoder.getN();
+    std::vector<uint8_t> message(k, 0);
+
+    // Create test message
+    Serial.print("\nOriginal message (");
+    Serial.print(k);
+    Serial.println(" bits):");
+    Serial.print("  Binary: ");
+    for (int i = 0; i < k; i++) {
+        message[i] = (i % 3 == 0) ? 1 : 0;
+        Serial.print((int)message[i]);
+    }
+    Serial.println();
+
+    // Encode
+    std::vector<uint8_t> codeword = encoder.encode(message);
+
+    Serial.print("\nEncoded codeword (");
+    Serial.print(n);
+    Serial.println(" bits):");
+    Serial.print("  Binary: ");
+    for (size_t i = 0; i < codeword.size(); i++) {
+        Serial.print((int)codeword[i]);
+    }
+    Serial.println("\n");
+
+    // ========== Test Case 1: No errors ==========
+    Serial.println("--- Test 1: No Errors ---");
+    std::vector<uint8_t> received1 = codeword;
+    std::vector<uint8_t> decoded1;
+
+    int errors1 = decoder.decode(received1, decoded1);
+
+    Serial.print("Errors corrected: ");
+    Serial.println(errors1);
+    Serial.print("Decoded message: ");
+    for (size_t i = 0; i < decoded1.size(); i++) {
+        Serial.print((int)decoded1[i]);
+    }
+
+    bool correct1 = (decoded1 == message);
+    Serial.print("\nDecoding result: ");
+    Serial.println(correct1 ? "✓ CORRECT" : "✗ INCORRECT");
+    Serial.println();
+
+    // ========== Test Case 2: Single error ==========
+    Serial.println("--- Test 2: Single Error at Position 5 ---");
+    std::vector<uint8_t> received2 = codeword;
+    received2[5] ^= 1;  // Introduce error at position 5
+
+    Serial.print("Received (corrupted): ");
+    for (size_t i = 0; i < received2.size(); i++) {
+        Serial.print((int)received2[i]);
+    }
+    Serial.println();
+
+    std::vector<uint8_t> decoded2;
+    int errors2 = decoder.decode(received2, decoded2);
+
+    Serial.print("Errors corrected: ");
+    Serial.println(errors2);
+    Serial.print("Decoded message: ");
+    for (size_t i = 0; i < decoded2.size(); i++) {
+        Serial.print((int)decoded2[i]);
+    }
+
+    bool correct2 = (decoded2 == message);
+    Serial.print("\nDecoding result: ");
+    Serial.println(correct2 ? "✓ CORRECT" : "✗ INCORRECT");
+    Serial.println();
+
+    // ========== Test Case 3: Double error (maximum correctable) ==========
+    Serial.println("--- Test 3: Double Error at Positions 3 and 10 ---");
+    std::vector<uint8_t> received3 = codeword;
+    received3[3] ^= 1;   // Error at position 3
+    received3[10] ^= 1;  // Error at position 10
+
+    Serial.print("Received (corrupted): ");
+    for (size_t i = 0; i < received3.size(); i++) {
+        Serial.print((int)received3[i]);
+    }
+    Serial.println();
+
+    std::vector<uint8_t> decoded3;
+    int errors3 = decoder.decode(received3, decoded3);
+
+    Serial.print("Errors corrected: ");
+    Serial.println(errors3);
+    Serial.print("Decoded message: ");
+    for (size_t i = 0; i < decoded3.size(); i++) {
+        Serial.print((int)decoded3[i]);
+    }
+
+    bool correct3 = (decoded3 == message);
+    Serial.print("\nDecoding result: ");
+    Serial.println(correct3 ? "✓ CORRECT" : "✗ INCORRECT");
+    Serial.println();
+
+    // ========== Test Case 4: Triple error (uncorrectable) ==========
+    Serial.println(
+        "--- Test 4: Triple Error (Beyond Correction Capability) ---");
+    std::vector<uint8_t> received4 = codeword;
+    received4[2] ^= 1;   // Error at position 2
+    received4[7] ^= 1;   // Error at position 7
+    received4[12] ^= 1;  // Error at position 12
+
+    Serial.print("Received (corrupted): ");
+    for (size_t i = 0; i < received4.size(); i++) {
+        Serial.print((int)received4[i]);
+    }
+    Serial.println();
+
+    std::vector<uint8_t> decoded4;
+    int errors4 = decoder.decode(received4, decoded4);
+
+    if (errors4 < 0) {
+        Serial.println("Decoding failed: too many errors");
+    } else {
+        Serial.print("Errors corrected: ");
+        Serial.println(errors4);
+        Serial.print("Decoded message: ");
+        for (size_t i = 0; i < decoded4.size(); i++) {
+            Serial.print((int)decoded4[i]);
+        }
+        bool correct4 = (decoded4 == message);
+        Serial.print("\nDecoding result: ");
+        Serial.println(correct4 ? "✓ CORRECT" : "✗ INCORRECT (expected)");
+    }
+    Serial.println();
+
+    Serial.println("=== All Tests Complete ===");
 }
+
+void loop() { delay(1000); }

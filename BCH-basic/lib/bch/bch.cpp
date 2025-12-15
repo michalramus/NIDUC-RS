@@ -1,388 +1,649 @@
 #include "bch.hpp"
 
-// GF(2^4) primitive polynomial: x^4 + x + 1 (0x13 in binary)
-#define PRIMITIVE_POLY 0x13
-#define GF16_SIZE 16
-#define ALPHA 2  // Primitive element of GF(16)
+#include <algorithm>
+#include <cmath>
+#include <iomanip>
+#include <iostream>
 
-// Precomputed log and antilog tables for GF(16)
-static uint8_t logTable[GF16_SIZE];
-static uint8_t antilogTable[GF16_SIZE];
-static bool tablesInitialized = false;
-
-// Initialize log and antilog tables
-static void initTables() {
-    if (tablesInitialized) return;
-
-    uint8_t x = 1;
-    for (int i = 0; i < GF16_SIZE - 1; i++) {
-        antilogTable[i] = x;
-        logTable[x] = i;
-
-        // Multiply by alpha (primitive element)
-        x <<= 1;
-        if (x & 0x10) {
-            x ^= PRIMITIVE_POLY;
-        }
-    }
-    antilogTable[GF16_SIZE - 1] = 1;
-    logTable[0] = 0;  // Undefined, but set to 0
-
-    tablesInitialized = true;
-}
-
-// GF(2^4) operations
-uint8_t GF16::add(uint8_t a, uint8_t b) {
-    return a ^ b;  // XOR for addition in GF(2)
-}
-
-uint8_t GF16::multiply(uint8_t a, uint8_t b) {
-    if (a == 0 || b == 0) return 0;
-    initTables();
-    return antilogTable[(logTable[a] + logTable[b]) % (GF16_SIZE - 1)];
-}
-
-uint8_t GF16::power(uint8_t base, uint8_t exp) {
-    if (exp == 0) return 1;
-    if (base == 0) return 0;
-    initTables();
-    return antilogTable[(logTable[base] * exp) % (GF16_SIZE - 1)];
-}
-
-uint8_t GF16::inverse(uint8_t a) {
-    if (a == 0) return 0;
-    initTables();
-    return antilogTable[(GF16_SIZE - 1) - logTable[a]];
-}
-
-uint8_t GF16::divide(uint8_t a, uint8_t b) {
-    if (b == 0) return 0;
-    if (a == 0) return 0;
-    return multiply(a, inverse(b));
-}
-
-uint8_t GF16::log(uint8_t a) {
-    initTables();
-    return logTable[a];
-}
-
-uint8_t GF16::antilog(uint8_t i) {
-    initTables();
-    return antilogTable[i % (GF16_SIZE - 1)];
-}
-
-// BCH Constructor
-BCH::BCH(int n_val, int k_val, int t_val) : n(n_val), k(k_val), t(t_val) {
-    initTables();
-
-    // Validate parameters for GF(2^4)
-    if (n > MAX_N || k > n || t > MAX_T || k <= 0 || t <= 0) {
-        Serial.println("Invalid BCH parameters!");
-        n = 15;
-        k = 7;
-        t = 2;  // Default to BCH(15,7,2)
+BCHEncoder::BCHEncoder(int m, int t, uint16_t primitivePoly)
+    : m(m), t(t), primitivePoly(primitivePoly), n(0), k(0) {
+    // Use default primitive polynomial if not provided
+    if (primitivePoly == 0) {
+        this->primitivePoly = getDefaultPrimitivePoly(m);
     }
 
-    // Check if n-k >= 2*t (necessary condition)
-    if (n - k < 2 * t) {
-        Serial.println("Warning: n-k must be >= 2*t for error correction!");
-    }
-
-    buildGeneratorPolynomial();
+    n = (1 << m) - 1;  // n = 2^m - 1
 }
 
-// Build generator polynomial from minimal polynomials
-void BCH::buildGeneratorPolynomial() {
-    // Initialize generator polynomial to 1
-    memset(generatorPoly, 0, sizeof(generatorPoly));
-    generatorPoly[0] = 1;
-    generatorDegree = 0;
+uint16_t BCHEncoder::getDefaultPrimitivePoly(int m) {
+    // Default primitive polynomials for GF(2^m)
+    // Represented as binary: bit i represents coefficient of x^i
+    static const std::map<int, uint16_t> defaultPolys = {
+        {2, 0b111},       // x^2 + x + 1
+        {3, 0b1011},      // x^3 + x + 1
+        {4, 0b10011},     // x^4 + x + 1
+        {5, 0b100101},    // x^5 + x^2 + 1
+        {6, 0b1000011},   // x^6 + x + 1
+        {7, 0b10000011},  // x^7 + x + 1
+        {8, 0b100011101}  // x^8 + x^4 + x^3 + x^2 + 1
+    };
 
-    // For binary BCH codes, we need minimal polynomials for α^i where i = 1, 2,
-    // ..., 2t For GF(2^4), the minimal polynomial of α is: m1(x) = x^4 + x + 1
-    // This is a simplified approach - build from consecutive roots
-
-    // For each root α^i (i = 1 to 2t), multiply by (x - α^i)
-    // But for binary codes, we use minimal polynomials instead
-    // Simplified: use a fixed generator for common codes
-
-    // Pre-computed generators for common BCH codes over GF(16):
-    if (n == 15 && k == 11 && t == 1) {
-        // BCH(15,11,1): g(x) = x^4 + x + 1
-        uint8_t g[] = {1, 1, 0, 0, 1};
-        memcpy(generatorPoly, g, 5);
-        generatorDegree = 4;
-    } else if (n == 15 && k == 7 && t == 2) {
-        // BCH(15,7,2): g(x) = x^8 + x^7 + x^6 + x^4 + 1
-        uint8_t g[] = {1, 0, 0, 1, 0, 1, 1, 1, 1};
-        memcpy(generatorPoly, g, 9);
-        generatorDegree = 8;
-    } else if (n == 15 && k == 5 && t == 3) {
-        // BCH(15,5,3): g(x) = x^10 + x^8 + x^5 + x^4 + x^2 + x + 1
-        uint8_t g[] = {1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 1};
-        memcpy(generatorPoly, g, 11);
-        generatorDegree = 10;
-    } else {
-        // Generic construction using minimal polynomials
-        // Build generator by multiplying minimal polynomials
-        uint8_t temp[MAX_N] = {1};
-        int tempDeg = 0;
-
-        for (int i = 1; i <= 2 * t; i++) {
-            // Minimal polynomial: (x - α^i)
-            // For binary BCH, use actual minimal polynomials
-            uint8_t minPoly[MAX_N] = {0};
-            minPoly[0] = GF16::power(ALPHA, i);
-            minPoly[1] = 1;  // x + α^i
-            int minDeg = 1;
-
-            uint8_t result[MAX_N] = {0};
-            polyMultiply(result, temp, tempDeg, minPoly, minDeg);
-            tempDeg = polyDegree(result, tempDeg + minDeg);
-            memcpy(temp, result, sizeof(temp));
-        }
-
-        memcpy(generatorPoly, temp, sizeof(generatorPoly));
-        generatorDegree = tempDeg;
+    auto it = defaultPolys.find(m);
+    if (it != defaultPolys.end()) {
+        return it->second;
     }
 
-    Serial.print("Generator polynomial degree: ");
-    Serial.println(generatorDegree);
-}
-
-// Polynomial multiplication
-void BCH::polyMultiply(uint8_t* result, const uint8_t* poly1, int deg1,
-                       const uint8_t* poly2, int deg2) {
-    memset(result, 0, MAX_N);
-    for (int i = 0; i <= deg1; i++) {
-        for (int j = 0; j <= deg2; j++) {
-            result[i + j] ^= GF16::multiply(poly1[i], poly2[j]);
-        }
-    }
-}
-
-// Get polynomial degree
-int BCH::polyDegree(const uint8_t* poly, int maxDeg) {
-    for (int i = maxDeg; i >= 0; i--) {
-        if (poly[i] != 0) return i;
-    }
+    std::cerr << "No default primitive polynomial for m=" << m << std::endl;
     return 0;
 }
 
-// BCH encoding using systematic encoding
-void BCH::encode(uint8_t* message, uint8_t* codeword) {
-    // Systematic encoding: [message | parity]
-    // Copy message to first k bits
-    for (int i = 0; i < k; i++) {
-        codeword[i] = message[i];
-    }
+void BCHEncoder::buildGaloisField() {
+    int fieldSize = 1 << m;  // 2^m
+    alphaToInt.resize(fieldSize);
+    intToAlpha.resize(fieldSize, -1);
 
-    // Compute parity bits by dividing x^(n-k) * message(x) by g(x)
-    uint8_t temp[MAX_N] = {0};
+    // α^0 = 1
+    alphaToInt[0] = 1;
+    intToAlpha[1] = 0;
 
-    // Shift message by (n-k) positions
-    for (int i = 0; i < k; i++) {
-        temp[i + (n - k)] = message[i];
-    }
+    // Generate field elements using primitive polynomial
+    uint16_t value = 1;
+    for (int i = 1; i < fieldSize - 1; i++) {
+        // Multiply by α (shift left)
+        value <<= 1;
 
-    // Polynomial division: compute remainder
-    for (int i = n - 1; i >= n - k; i--) {
-        if (temp[i]) {
-            for (int j = 0; j <= generatorDegree && (i - j) >= 0; j++) {
-                temp[i - j] ^= generatorPoly[j];
-            }
+        // If overflow (bit m is set), reduce using primitive polynomial
+        if (value & (1 << m)) {
+            value ^= primitivePoly;
         }
-    }
 
-    // Copy parity bits to codeword
-    for (int i = k; i < n; i++) {
-        codeword[i] = temp[i - k];
+        alphaToInt[i] = value;
+        intToAlpha[value] = i;
     }
 }
 
-// Calculate syndrome
-void BCH::calculateSyndrome(uint8_t* received, uint8_t* syndrome) {
-    // Evaluate received polynomial at α^1, α^2, ..., α^(2t)
-    for (int i = 0; i < 2 * t; i++) {
-        syndrome[i] = 0;
-        uint8_t alphaI = GF16::power(ALPHA, i + 1);
-
-        // Horner's method for polynomial evaluation
-        for (int j = n - 1; j >= 0; j--) {
-            syndrome[i] = GF16::multiply(syndrome[i], alphaI);
-            if (received[j]) {
-                syndrome[i] ^= GF16::power(alphaI, j);
-            }
-        }
-    }
+uint16_t BCHEncoder::gfAdd(uint16_t a, uint16_t b) {
+    // Addition in GF(2^m) is XOR
+    return a ^ b;
 }
 
-// Berlekamp-Massey algorithm to find error locator polynomial
-int BCH::berlekampMassey(uint8_t syndrome[], uint8_t lambda[], int syndLen) {
-    uint8_t C[MAX_T + 1] = {0};  // Current polynomial
-    uint8_t B[MAX_T + 1] = {0};  // Previous polynomial
-    uint8_t T[MAX_T + 1] = {0};  // Temporary
+uint16_t BCHEncoder::gfMultiply(uint16_t a, uint16_t b) {
+    if (a == 0 || b == 0) return 0;
 
-    C[0] = 1;
-    B[0] = 1;
-    int L = 0;      // Degree of C(x)
-    int m = 1;      // Length of feedback shift register
-    uint8_t b = 1;  // Discrepancy
+    // Use logarithm tables for multiplication
+    int logA = intToAlpha[a];
+    int logB = intToAlpha[b];
+    int logResult = (logA + logB) % (n);  // n = 2^m - 1
 
-    for (int n = 0; n < syndLen; n++) {
-        // Calculate discrepancy
-        uint8_t d = syndrome[n];
-        for (int i = 1; i <= L; i++) {
-            d ^= GF16::multiply(C[i], syndrome[n - i]);
+    return alphaToInt[logResult];
+}
+
+uint16_t BCHEncoder::gfPower(uint16_t alpha, int power) {
+    if (power == 0) return 1;
+    if (alpha == 0) return 0;
+
+    power = power % n;  // α^n = α^0 = 1 in GF(2^m)
+    if (power < 0) power += n;
+
+    return alphaToInt[power];
+}
+
+std::vector<std::set<int>> BCHEncoder::generateCyclotomicCosets() {
+    std::vector<std::set<int>> cosets;
+    std::set<int> used;
+
+    // We need cosets containing 1, 2, ..., 2t
+    // (for BCH code with designed distance d = 2t + 1)
+    for (int i = 1; i <= 2 * t; i++) {
+        if (used.find(i) != used.end()) {
+            continue;  // Already in a coset
         }
 
-        if (d == 0) {
-            m++;
-        } else {
-            if (2 * L <= n) {
-                // Copy C to T
-                memcpy(T, C, sizeof(C));
+        std::set<int> coset;
+        int element = i;
 
-                // C(x) = C(x) - (d/b) * x^m * B(x)
-                uint8_t factor = GF16::divide(d, b);
-                for (int i = 0; i <= MAX_T; i++) {
-                    if (i >= m && B[i - m] != 0) {
-                        C[i] ^= GF16::multiply(factor, B[i - m]);
-                    }
+        // Generate cyclotomic coset by repeated squaring mod n
+        do {
+            coset.insert(element);
+            used.insert(element);
+            element = (element * 2) % n;
+        } while (coset.find(element) == coset.end());
+
+        cosets.push_back(coset);
+    }
+
+    return cosets;
+}
+
+std::vector<uint8_t> BCHEncoder::computeMinimalPolynomial(
+    const std::set<int>& coset) {
+    // Minimal polynomial is the product of (x - α^i) for all i in coset
+    std::vector<uint8_t> minPoly = {1};  // Start with 1
+
+    for (int exponent : coset) {
+        // Multiply by (x - α^exponent) = (x + α^exponent) in GF(2)
+        // Current polynomial: minPoly
+        // New term: (x + α^exponent)
+
+        std::vector<uint8_t> term(2);
+        term[0] = alphaToInt[exponent];  // Constant term: α^exponent
+        term[1] = 1;                     // x coefficient
+
+        minPoly = polyMultiply(minPoly, term);
+    }
+
+    return minPoly;
+}
+
+int BCHEncoder::polyDegree(const std::vector<uint8_t>& poly) const {
+    for (int i = poly.size() - 1; i >= 0; i--) {
+        if (poly[i] != 0) return i;
+    }
+    return -1;
+}
+
+std::vector<uint8_t> BCHEncoder::polyMultiply(const std::vector<uint8_t>& a,
+                                              const std::vector<uint8_t>& b) {
+    if (a.empty() || b.empty()) return {0};
+
+    std::vector<uint8_t> result(a.size() + b.size() - 1, 0);
+
+    for (size_t i = 0; i < a.size(); i++) {
+        for (size_t j = 0; j < b.size(); j++) {
+            uint16_t prod = gfMultiply(a[i], b[j]);
+            result[i + j] = gfAdd(result[i + j], prod);
+        }
+    }
+
+    return result;
+}
+
+std::vector<uint8_t> BCHEncoder::polyGCD(const std::vector<uint8_t>& a,
+                                         const std::vector<uint8_t>& b) {
+    std::vector<uint8_t> u = a;
+    std::vector<uint8_t> v = b;
+
+    while (polyDegree(v) >= 0) {
+        std::vector<uint8_t> remainder;
+        polyDivide(u, v, remainder);
+        u = v;
+        v = remainder;
+    }
+
+    return u;
+}
+
+std::vector<uint8_t> BCHEncoder::polyLCM(const std::vector<uint8_t>& a,
+                                         const std::vector<uint8_t>& b) {
+    std::vector<uint8_t> gcd = polyGCD(a, b);
+    std::vector<uint8_t> product = polyMultiply(a, b);
+    std::vector<uint8_t> remainder;
+    return polyDivide(product, gcd, remainder);
+}
+
+std::vector<uint8_t> BCHEncoder::polyDivide(
+    const std::vector<uint8_t>& dividend, const std::vector<uint8_t>& divisor,
+    std::vector<uint8_t>& remainder) {
+    remainder = dividend;
+    int degDivisor = polyDegree(divisor);
+
+    if (degDivisor < 0) {
+        std::cerr << "Division by zero polynomial" << std::endl;
+        return {0};
+    }
+
+    std::vector<uint8_t> quotient;
+    uint16_t leadCoeff = divisor[degDivisor];
+
+    while (polyDegree(remainder) >= degDivisor) {
+        int degDiff = polyDegree(remainder) - degDivisor;
+
+        // Calculate quotient coefficient
+        uint16_t coeff = remainder[polyDegree(remainder)];
+
+        // In GF(2^m), division by leadCoeff
+        if (leadCoeff != 1) {
+            // Find multiplicative inverse
+            int logLead = intToAlpha[leadCoeff];
+            int logCoeff = intToAlpha[coeff];
+            int logQuot = (logCoeff - logLead + n) % n;
+            coeff = alphaToInt[logQuot];
+        }
+
+        // Extend quotient if needed
+        if (quotient.size() < (size_t)(degDiff + 1)) {
+            quotient.resize(degDiff + 1, 0);
+        }
+        quotient[degDiff] = coeff;
+
+        // Subtract divisor * coeff * x^degDiff from remainder
+        for (int i = 0; i <= degDivisor; i++) {
+            uint16_t prod = gfMultiply(divisor[i], coeff);
+            remainder[i + degDiff] = gfAdd(remainder[i + degDiff], prod);
+        }
+    }
+
+    if (quotient.empty()) quotient = {0};
+    return quotient;
+}
+
+void BCHEncoder::generateGeneratorPolynomial() {
+    // Generate cyclotomic cosets
+    auto cosets = generateCyclotomicCosets();
+
+    std::cout << "Cyclotomic cosets for roots α^1 to α^" << (2 * t) << ":"
+              << std::endl;
+    for (size_t i = 0; i < cosets.size(); i++) {
+        std::cout << "  Coset " << i << ": {";
+        bool first = true;
+        for (int elem : cosets[i]) {
+            if (!first) std::cout << ", ";
+            std::cout << elem;
+            first = false;
+        }
+        std::cout << "}" << std::endl;
+    }
+
+    // Start with polynomial 1
+    generatorPoly = {1};
+
+    // Compute LCM of all minimal polynomials
+    for (const auto& coset : cosets) {
+        std::vector<uint8_t> minPoly = computeMinimalPolynomial(coset);
+
+        std::cout << "  Minimal polynomial for coset: ";
+        for (int i = polyDegree(minPoly); i >= 0; i--) {
+            if (minPoly[i] != 0) {
+                if (i < polyDegree(minPoly)) std::cout << " + ";
+                if (i == 0) {
+                    std::cout << (int)minPoly[i];
+                } else if (i == 1) {
+                    if (minPoly[i] == 1)
+                        std::cout << "x";
+                    else
+                        std::cout << (int)minPoly[i] << "x";
+                } else {
+                    if (minPoly[i] == 1)
+                        std::cout << "x^" << i;
+                    else
+                        std::cout << (int)minPoly[i] << "x^" << i;
                 }
-
-                L = n + 1 - L;
-                memcpy(B, T, sizeof(B));
-                b = d;
-                m = 1;
-            } else {
-                // C(x) = C(x) - (d/b) * x^m * B(x)
-                uint8_t factor = GF16::divide(d, b);
-                for (int i = 0; i <= MAX_T; i++) {
-                    if (i >= m && B[i - m] != 0) {
-                        C[i] ^= GF16::multiply(factor, B[i - m]);
-                    }
-                }
-                m++;
             }
         }
+        std::cout << std::endl;
+
+        generatorPoly = polyLCM(generatorPoly, minPoly);
     }
 
-    // Copy result
-    memcpy(lambda, C, (L + 1) * sizeof(uint8_t));
-    return L;
+    // Calculate k (message length)
+    k = n - polyDegree(generatorPoly);
 }
 
-// Chien search to find error locations
-int BCH::chienSearch(uint8_t lambda[], int lambdaDeg,
-                     uint8_t errorLocations[]) {
-    int numErrors = 0;
+bool BCHEncoder::initialize() {
+    std::cout << "Initializing BCH(" << n << ", k, " << (2 * t + 1)
+              << ") over GF(2^" << m << ")" << std::endl;
+    std::cout << "Primitive polynomial: 0x" << std::hex << primitivePoly
+              << std::dec << std::endl;
 
-    // Test each position in the codeword
-    for (int i = 0; i < n; i++) {
-        // Evaluate lambda at α^(-i)
-        uint8_t sum = 0;
-        for (int j = 0; j <= lambdaDeg; j++) {
-            if (lambda[j] != 0) {
-                sum ^= GF16::multiply(
-                    lambda[j], GF16::power(ALPHA, (GF16_SIZE - 1 - i) * j));
-            }
-        }
+    // Step 1: Build Galois Field
+    buildGaloisField();
+    std::cout << "✓ Galois Field GF(2^" << m << ") constructed" << std::endl;
 
-        if (sum == 0) {
-            // Found an error at position i
-            errorLocations[numErrors++] = i;
-            if (numErrors >= t) break;
-        }
-    }
-
-    return numErrors;
-}
-
-// Forney algorithm for error values (binary case - always 1)
-void BCH::forneyAlgorithm(uint8_t syndrome[], uint8_t lambda[], int lambdaDeg,
-                          uint8_t errorLocations[], int numErrors,
-                          uint8_t errorValues[]) {
-    // For binary BCH codes, error values are always 1 (bit flip)
-    for (int i = 0; i < numErrors; i++) {
-        errorValues[i] = 1;
-    }
-}
-
-// Decode received codeword
-bool BCH::decode(uint8_t* received, uint8_t* message) {
-    uint8_t syndrome[2 * MAX_T];
-    calculateSyndrome(received, syndrome);
-
-    // Check if all syndromes are zero (no errors)
-    bool hasError = false;
-    for (int i = 0; i < 2 * t; i++) {
-        if (syndrome[i] != 0) {
-            hasError = true;
-            break;
-        }
-    }
-
-    if (!hasError) {
-        // No errors, extract message
-        for (int i = 0; i < k; i++) {
-            message[i] = received[i];
-        }
-        return true;
-    }
-
-    // Use Berlekamp-Massey to find error locator polynomial
-    uint8_t lambda[MAX_T + 1] = {0};
-    int lambdaDeg = berlekampMassey(syndrome, lambda, 2 * t);
-
-    if (lambdaDeg == 0 || lambdaDeg > t) {
-        Serial.println("Decoding failed: too many errors");
-        // Extract message anyway (uncorrected)
-        for (int i = 0; i < k; i++) {
-            message[i] = received[i];
-        }
-        return false;
-    }
-
-    // Use Chien search to find error locations
-    uint8_t errorLocations[MAX_T];
-    int numErrors = chienSearch(lambda, lambdaDeg, errorLocations);
-
-    if (numErrors != lambdaDeg) {
-        Serial.println("Decoding failed: error location mismatch");
-        for (int i = 0; i < k; i++) {
-            message[i] = received[i];
-        }
-        return false;
-    }
-
-    // Get error values (always 1 for binary)
-    uint8_t errorValues[MAX_T];
-    forneyAlgorithm(syndrome, lambda, lambdaDeg, errorLocations, numErrors,
-                    errorValues);
-
-    // Correct errors
-    for (int i = 0; i < numErrors; i++) {
-        if (errorLocations[i] < n) {
-            received[errorLocations[i]] ^= errorValues[i];
-        }
-    }
-
-    // Extract corrected message
-    for (int i = 0; i < k; i++) {
-        message[i] = received[i];
-    }
-
-    Serial.print("Corrected ");
-    Serial.print(numErrors);
-    Serial.println(" errors");
+    // Step 2: Generate generator polynomial
+    generateGeneratorPolynomial();
+    std::cout << "✓ Generator polynomial g(x) constructed" << std::endl;
+    std::cout << "  Degree: " << polyDegree(generatorPoly) << std::endl;
+    std::cout << "  Message length k: " << k << std::endl;
 
     return true;
 }
 
-// Helper to print binary
-void BCH::printBinary(uint8_t data[], int length) {
-    for (int i = 0; i < length; i++) {
-        Serial.print(data[i] ? "1" : "0");
+std::vector<uint8_t> BCHEncoder::encode(const std::vector<uint8_t>& message) {
+    if (message.size() != (size_t)k) {
+        std::cerr << "Error: Message length must be " << k << " bits, got "
+                  << message.size() << std::endl;
+        return {};
     }
+
+    // Step 1: Scale source information by multiplying by x^(n-k)
+    // This shifts the message to the left by (n-k) positions
+    std::vector<uint8_t> scaledMessage(n, 0);
+    int parityBits = n - k;
+
+    for (int i = 0; i < k; i++) {
+        scaledMessage[i + parityBits] = message[i];
+    }
+
+    // Step 2: Divide scaled message by generator polynomial
+    std::vector<uint8_t> remainder;
+    polyDivide(scaledMessage, generatorPoly, remainder);
+
+    // Step 3: Create systematic codeword: message + parity
+    std::vector<uint8_t> codeword(n, 0);
+
+    // Add parity bits (remainder) to the beginning
+    for (size_t i = 0; i < remainder.size() && i < (size_t)parityBits; i++) {
+        codeword[i] = remainder[i];
+    }
+
+    // Add original message to the end
+    for (int i = 0; i < k; i++) {
+        codeword[i + parityBits] = message[i];
+    }
+
+    return codeword;
+}
+
+void BCHEncoder::printCodeInfo() const {
+    std::cout << "\n=== BCH Code Information ===" << std::endl;
+    std::cout << "Code parameters: BCH(" << n << ", " << k << ", "
+              << (2 * t + 1) << ")" << std::endl;
+    std::cout << "  n (code length): " << n << std::endl;
+    std::cout << "  k (message length): " << k << std::endl;
+    std::cout << "  t (error correction): " << t << " errors" << std::endl;
+    std::cout << "  d_min (minimum distance): " << (2 * t + 1) << std::endl;
+    std::cout << "  Parity bits: " << (n - k) << std::endl;
+    std::cout << "  Code rate: " << (float)k / n << std::endl;
+
+    std::cout << "\nGenerator polynomial g(x): ";
+    for (int i = polyDegree(generatorPoly); i >= 0; i--) {
+        if (generatorPoly[i] != 0) {
+            if (i < polyDegree(generatorPoly)) std::cout << " + ";
+            if (i == 0) {
+                std::cout << (int)generatorPoly[i];
+            } else if (i == 1) {
+                if (generatorPoly[i] == 1)
+                    std::cout << "x";
+                else
+                    std::cout << (int)generatorPoly[i] << "x";
+            } else {
+                if (generatorPoly[i] == 1)
+                    std::cout << "x^" << i;
+                else
+                    std::cout << (int)generatorPoly[i] << "x^" << i;
+            }
+        }
+    }
+    std::cout << std::endl;
+
+    std::cout << "\nBinary representation: ";
+    for (int i = polyDegree(generatorPoly); i >= 0; i--) {
+        std::cout << (int)generatorPoly[i];
+    }
+    std::cout << "\n=========================\n" << std::endl;
+}
+
+// ============================================================================
+// BCH DECODER IMPLEMENTATION
+// ============================================================================
+
+BCHDecoder::BCHDecoder(BCHEncoder& encoder) : encoder(encoder) {}
+
+std::vector<uint16_t> BCHDecoder::calculateSyndromes(
+    const std::vector<uint8_t>& received) {
+    std::vector<uint16_t> syndromes(2 * encoder.t);
+
+    // Calculate syndromes S_i = r(α^i) for i = 1, 2, ..., 2t
+    for (int i = 0; i < 2 * encoder.t; i++) {
+        uint16_t syndrome = 0;
+
+        // Evaluate received polynomial at α^(i+1)
+        for (size_t j = 0; j < received.size(); j++) {
+            if (received[j] != 0) {
+                // Calculate α^((i+1)*j)
+                int exponent = ((i + 1) * j) % encoder.n;
+                uint16_t term = encoder.alphaToInt[exponent];
+                syndrome = encoder.gfAdd(syndrome, term);
+            }
+        }
+
+        syndromes[i] = syndrome;
+    }
+
+    return syndromes;
+}
+
+uint16_t BCHDecoder::evaluatePolynomial(const std::vector<uint16_t>& poly,
+                                        uint16_t point) {
+    if (poly.empty()) return 0;
+
+    uint16_t result = 0;
+    uint16_t power = 1;
+
+    for (size_t i = 0; i < poly.size(); i++) {
+        if (poly[i] != 0) {
+            uint16_t term = encoder.gfMultiply(poly[i], power);
+            result = encoder.gfAdd(result, term);
+        }
+        power = encoder.gfMultiply(power, point);
+    }
+
+    return result;
+}
+
+bool BCHDecoder::findErrorLocatorPolynomial(
+    const std::vector<uint16_t>& syndromes, std::vector<uint16_t>& errorLocator,
+    int& numErrors) {
+    // Try Peterson's algorithm for different error counts
+    // Start from t errors down to 1
+
+    for (int v = encoder.t; v >= 1; v--) {
+        // Build syndrome matrix for v errors
+        // Peterson's algorithm: solve S * Λ = -S_shift
+        std::vector<std::vector<uint16_t>> matrix(v, std::vector<uint16_t>(v));
+        std::vector<uint16_t> rhs(v);
+
+        // Syndrome matrix (Toeplitz structure):
+        // | S_1   S_2   ...  S_v   |   | Λ_v |   | S_{v+1} |
+        // | S_2   S_3   ...  S_{v+1}|   | Λ_{v-1}| = | S_{v+2} |
+        // | ...   ...  ...   ...   |   | ... |   | ...     |
+        // | S_v   S_{v+1} ... S_{2v-1}| | Λ_1 |   | S_{2v}  |
+
+        for (int i = 0; i < v; i++) {
+            for (int j = 0; j < v; j++) {
+                matrix[i][j] = syndromes[i + j];
+            }
+            rhs[i] = syndromes[i + v];
+        }
+
+        // Check if matrix is singular
+        uint16_t det = determinant(matrix);
+        if (det == 0) {
+            continue;  // Try fewer errors
+        }
+
+        // Solve for error locator coefficients
+        std::vector<uint16_t> lambda(v);
+        if (!solveLinearSystem(matrix, rhs, lambda)) {
+            continue;
+        }
+
+        // Build error locator polynomial: Λ(x) = 1 + Λ_1*x + ... + Λ_v*x^v
+        errorLocator.resize(v + 1);
+        errorLocator[0] = 1;
+        for (int i = 0; i < v; i++) {
+            errorLocator[i + 1] = lambda[i];
+        }
+
+        numErrors = v;
+        return true;
+    }
+
+    // No errors or all syndromes are zero
+    if (syndromes[0] == 0) {
+        errorLocator = {1};  // No errors
+        numErrors = 0;
+        return true;
+    }
+
+    return false;  // Unable to find error locator polynomial
+}
+
+std::vector<int> BCHDecoder::chienSearch(
+    const std::vector<uint16_t>& errorLocator) {
+    std::vector<int> errorPositions;
+
+    // Chien search: evaluate Λ(α^-i) for i = 0, 1, ..., n-1
+    // If Λ(α^-i) = 0, then error is at position i
+    for (int i = 0; i < encoder.n; i++) {
+        // Evaluate at α^-i = α^(n-i)
+        int exponent = (encoder.n - i) % encoder.n;
+        uint16_t alphaInv = encoder.alphaToInt[exponent];
+
+        uint16_t result = evaluatePolynomial(errorLocator, alphaInv);
+
+        if (result == 0) {
+            errorPositions.push_back(i);
+        }
+    }
+
+    return errorPositions;
+}
+
+uint16_t BCHDecoder::determinant(
+    const std::vector<std::vector<uint16_t>>& matrix) {
+    int n = matrix.size();
+    if (n == 0) return 0;
+    if (n == 1) return matrix[0][0];
+    if (n == 2) {
+        uint16_t a = encoder.gfMultiply(matrix[0][0], matrix[1][1]);
+        uint16_t b = encoder.gfMultiply(matrix[0][1], matrix[1][0]);
+        return encoder.gfAdd(a, b);
+    }
+
+    // For larger matrices, use expansion (simplified for small t)
+    uint16_t det = 0;
+    for (int j = 0; j < n; j++) {
+        // Create submatrix
+        std::vector<std::vector<uint16_t>> submatrix(
+            n - 1, std::vector<uint16_t>(n - 1));
+        for (int i = 1; i < n; i++) {
+            int col = 0;
+            for (int k = 0; k < n; k++) {
+                if (k == j) continue;
+                submatrix[i - 1][col++] = matrix[i][k];
+            }
+        }
+
+        uint16_t cofactor =
+            encoder.gfMultiply(matrix[0][j], determinant(submatrix));
+        det = encoder.gfAdd(det, cofactor);  // In GF(2), no sign alternation
+    }
+
+    return det;
+}
+
+bool BCHDecoder::solveLinearSystem(
+    const std::vector<std::vector<uint16_t>>& matrix,
+    const std::vector<uint16_t>& rhs, std::vector<uint16_t>& solution) {
+    int n = matrix.size();
+    solution.resize(n);
+
+    // Use Cramer's rule for small systems
+    uint16_t det = determinant(matrix);
+    if (det == 0) return false;
+
+    // Find multiplicative inverse of determinant
+    int logDet = encoder.intToAlpha[det];
+    int logDetInv = (encoder.n - logDet) % encoder.n;
+    uint16_t detInv = encoder.alphaToInt[logDetInv];
+
+    for (int i = 0; i < n; i++) {
+        // Replace column i with rhs
+        std::vector<std::vector<uint16_t>> matrixI = matrix;
+        for (int j = 0; j < n; j++) {
+            matrixI[j][i] = rhs[j];
+        }
+
+        uint16_t detI = determinant(matrixI);
+        solution[i] = encoder.gfMultiply(detI, detInv);
+    }
+
+    return true;
+}
+
+int BCHDecoder::decode(const std::vector<uint8_t>& received,
+                       std::vector<uint8_t>& correctedMessage) {
+    int errorCount;
+    std::vector<uint8_t> corrected = decodeCodeword(received, errorCount);
+
+    if (errorCount < 0) {
+        return -1;  // Decoding failed
+    }
+
+    // Extract message from corrected codeword (systematic code)
+    int parityBits = encoder.n - encoder.k;
+    correctedMessage.resize(encoder.k);
+    for (int i = 0; i < encoder.k; i++) {
+        correctedMessage[i] = corrected[i + parityBits];
+    }
+
+    return errorCount;
+}
+
+std::vector<uint8_t> BCHDecoder::decodeCodeword(
+    const std::vector<uint8_t>& received, int& errorCount) {
+    errorCount = 0;
+
+    if (received.size() != (size_t)encoder.n) {
+        std::cerr << "Error: Received codeword length must be " << encoder.n
+                  << " bits, got " << received.size() << std::endl;
+        errorCount = -1;
+        return {};
+    }
+
+    // Step 1: Calculate syndromes
+    std::vector<uint16_t> syndromes = calculateSyndromes(received);
+
+    // Check if all syndromes are zero (no errors)
+    bool allZero = true;
+    for (auto s : syndromes) {
+        if (s != 0) {
+            allZero = false;
+            break;
+        }
+    }
+
+    if (allZero) {
+        std::cout << "No errors detected" << std::endl;
+        return received;  // No errors
+    }
+
+    // Step 2: Find error locator polynomial
+    std::vector<uint16_t> errorLocator;
+    int numErrors;
+
+    if (!findErrorLocatorPolynomial(syndromes, errorLocator, numErrors)) {
+        std::cerr << "Unable to find error locator polynomial - too many errors"
+                  << std::endl;
+        errorCount = -1;
+        return received;  // Return uncorrected
+    }
+
+    std::cout << "Detected " << numErrors << " error(s)" << std::endl;
+
+    // Step 3: Find error locations using Chien search
+    std::vector<int> errorPositions = chienSearch(errorLocator);
+
+    if (errorPositions.size() != (size_t)numErrors) {
+        std::cerr << "Error location mismatch: expected " << numErrors
+                  << " errors, found " << errorPositions.size() << std::endl;
+        errorCount = -1;
+        return received;
+    }
+
+    std::cout << "Error positions: ";
+    for (auto pos : errorPositions) {
+        std::cout << pos << " ";
+    }
+    std::cout << std::endl;
+
+    // Step 4: Correct errors (flip bits for binary BCH)
+    std::vector<uint8_t> corrected = received;
+    for (int pos : errorPositions) {
+        corrected[pos] ^= 1;  // Flip bit
+    }
+
+    errorCount = numErrors;
+    return corrected;
 }
