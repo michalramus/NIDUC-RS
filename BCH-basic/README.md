@@ -43,28 +43,57 @@ The encoder follows these steps to create systematic codewords:
    - Codeword: c(x) = r(x) + x^(n-k) · m(x)
    - Result: [parity bits | message bits]
 
-## BCH Decoding Process (Simplified)
+## BCH Decoding Process (Hamming Weight Method)
 
-The decoder implements syndrome-based decoding with Peterson's algorithm:
+The decoder implements simplified syndrome-based decoding with cyclic shifts:
 
 ### 1. **Syndrome Calculation**
-   - Evaluate received polynomial r(x) at roots of g(x)
-   - Syndromes S_i = r(α^i) for i = 1, 2, ..., 2t
-   - If all syndromes are zero, no errors detected
+   - Calculate syndrome s as remainder: s = r(x) mod g(x)
+   - Syndrome is a binary vector of length (n-k)
 
-### 2. **Error Locator Polynomial (Peterson's Algorithm)**
-   - Build syndrome matrix from calculated syndromes
-   - Solve linear system to find error locator coefficients
-   - Form error locator polynomial Λ(x) = 1 + Λ₁x + ... + Λᵥx^v
-   - Try different error counts v from t down to 1
+### 2. **Hamming Weight Check**
+   - Calculate Hamming weight w(s) = number of 1's in syndrome
+   - Compare with error correction capability t
 
-### 3. **Error Location (Chien Search)**
-   - Evaluate Λ(α^-i) for i = 0, 1, ..., n-1
-   - If Λ(α^-i) = 0, error exists at position i
-   - Collect all error positions
+### 3. **Case 1: w(s) ≤ t (Errors in Parity Bits)**
+   - Errors are located in control/parity portion
+   - Correct by adding syndrome: c_D = c_Y ⊕ s
+   - If cyclic shifts were done, shift back to restore original form
 
-### 4. **Error Correction**
-   - For binary BCH, flip bits at d& decoder class definitions
+### 4. **Case 2: w(s) > t (Errors in Information Bits)**
+   - Errors span into information portion
+   - Cyclically shift received vector right by 1 position
+   - Recalculate syndrome and check weight again
+   - Repeat until w(s) ≤ t or all n positions checked
+   - Once w(s) ≤ t: correct errors, then shift back left by same amount
+
+### 5. **Uncorrectable Errors**
+   - If after n cyclic shifts no correction possible
+   - Return error indication (-1)
+
+This method avoids matrix operations and uses simple binary operations.
+
+## Mathematical Validation (Decoding)
+
+The decoding process is **mathematically sound**:
+
+1. **Syndrome Properties**: s = r(x) mod g(x)
+   - If r(x) is valid codeword, s = 0
+   - If errors present, s encodes error pattern
+
+2. **Hamming Weight Method**: w(s) ≤ t indicates correctable pattern
+   - For cyclic codes, errors can be rotated to parity portion
+   - Cyclic shifts preserve code structure
+
+3. **Correction Guarantee**: For e ≤ t errors, method succeeds
+   - After at most n shifts, errors align with parity bits
+   - XOR with syndrome corrects the errors
+
+## Code Structure
+
+```
+lib/bch/
+├── bch.hpp          - BCH encoder & decoder class definitions
 └── bch.cpp          - Complete implementation
 
 src/

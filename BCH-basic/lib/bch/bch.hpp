@@ -98,7 +98,7 @@ class BCHEncoder {
 };
 
 /**
- * BCH Decoder - Simplified implementation using syndrome decoding
+ * BCH Decoder - Hamming weight based decoding with cyclic shifts
  * Works with BCHEncoder to decode and correct errors
  */
 class BCHDecoder {
@@ -128,29 +128,20 @@ class BCHDecoder {
                                         int& errorCount);
 
    private:
-    BCHEncoder& encoder;  // Reference to encoder for parameters and GF ops
+    BCHEncoder& encoder;  // Reference to encoder for parameters
 
-    // Syndrome calculation
-    std::vector<uint16_t> calculateSyndromes(
+    // Calculate syndrome vector (binary)
+    std::vector<uint8_t> calculateSyndrome(
         const std::vector<uint8_t>& received);
 
-    // Error locator polynomial using Peterson's algorithm (simplified)
-    bool findErrorLocatorPolynomial(const std::vector<uint16_t>& syndromes,
-                                    std::vector<uint16_t>& errorLocator,
-                                    int& numErrors);
+    // Calculate Hamming weight
+    int hammingWeight(const std::vector<uint8_t>& vector);
 
-    // Chien search to find error locations
-    std::vector<int> chienSearch(const std::vector<uint16_t>& errorLocator);
+    // Cyclic shift right
+    std::vector<uint8_t> cyclicShiftRight(const std::vector<uint8_t>& vector);
 
-    // Helper: evaluate polynomial at a point in GF
-    uint16_t evaluatePolynomial(const std::vector<uint16_t>& poly,
-                                uint16_t point);
-
-    // Matrix operations for Peterson's algorithm
-    bool solveLinearSystem(const std::vector<std::vector<uint16_t>>& matrix,
-                           const std::vector<uint16_t>& rhs,
-                           std::vector<uint16_t>& solution);
-    uint16_t determinant(const std::vector<std::vector<uint16_t>>& matrix);
+    // Cyclic shift left
+    std::vector<uint8_t> cyclicShiftLeft(const std::vector<uint8_t>& vector);
 };
 
 #endif  // BCH_HPP

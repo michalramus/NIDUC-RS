@@ -374,192 +374,59 @@ void BCHEncoder::printCodeInfo() const {
 }
 
 // ============================================================================
-// BCH DECODER IMPLEMENTATION
+// BCH DECODER IMPLEMENTATION - Hamming Weight Method
 // ============================================================================
 
 BCHDecoder::BCHDecoder(BCHEncoder& encoder) : encoder(encoder) {}
 
-std::vector<uint16_t> BCHDecoder::calculateSyndromes(
+std::vector<uint8_t> BCHDecoder::calculateSyndrome(
     const std::vector<uint8_t>& received) {
-    std::vector<uint16_t> syndromes(2 * encoder.t);
+    // Syndrom = reszta z dzielenia odebranego wektora przez wielomian
+    // generujący
+    std::vector<uint8_t> remainder;
+    encoder.polyDivide(received, encoder.generatorPoly, remainder);
 
-    // Calculate syndromes S_i = r(α^i) for i = 1, 2, ..., 2t
-    for (int i = 0; i < 2 * encoder.t; i++) {
-        uint16_t syndrome = 0;
-
-        // Evaluate received polynomial at α^(i+1)
-        for (size_t j = 0; j < received.size(); j++) {
-            if (received[j] != 0) {
-                // Calculate α^((i+1)*j)
-                int exponent = ((i + 1) * j) % encoder.n;
-                uint16_t term = encoder.alphaToInt[exponent];
-                syndrome = encoder.gfAdd(syndrome, term);
-            }
-        }
-
-        syndromes[i] = syndrome;
+    // Wyrównaj długość syndromu do (n-k) bitów
+    int parityBits = encoder.n - encoder.k;
+    if (remainder.size() < (size_t)parityBits) {
+        remainder.resize(parityBits, 0);
     }
 
-    return syndromes;
+    return remainder;
 }
 
-uint16_t BCHDecoder::evaluatePolynomial(const std::vector<uint16_t>& poly,
-                                        uint16_t point) {
-    if (poly.empty()) return 0;
-
-    uint16_t result = 0;
-    uint16_t power = 1;
-
-    for (size_t i = 0; i < poly.size(); i++) {
-        if (poly[i] != 0) {
-            uint16_t term = encoder.gfMultiply(poly[i], power);
-            result = encoder.gfAdd(result, term);
-        }
-        power = encoder.gfMultiply(power, point);
+int BCHDecoder::hammingWeight(const std::vector<uint8_t>& vector) {
+    int weight = 0;
+    for (auto bit : vector) {
+        if (bit != 0) weight++;
     }
-
-    return result;
+    return weight;
 }
 
-bool BCHDecoder::findErrorLocatorPolynomial(
-    const std::vector<uint16_t>& syndromes, std::vector<uint16_t>& errorLocator,
-    int& numErrors) {
-    // Try Peterson's algorithm for different error counts
-    // Start from t errors down to 1
+std::vector<uint8_t> BCHDecoder::cyclicShiftRight(
+    const std::vector<uint8_t>& vector) {
+    if (vector.empty()) return vector;
 
-    for (int v = encoder.t; v >= 1; v--) {
-        // Build syndrome matrix for v errors
-        // Peterson's algorithm: solve S * Λ = -S_shift
-        std::vector<std::vector<uint16_t>> matrix(v, std::vector<uint16_t>(v));
-        std::vector<uint16_t> rhs(v);
-
-        // Syndrome matrix (Toeplitz structure):
-        // | S_1   S_2   ...  S_v   |   | Λ_v |   | S_{v+1} |
-        // | S_2   S_3   ...  S_{v+1}|   | Λ_{v-1}| = | S_{v+2} |
-        // | ...   ...  ...   ...   |   | ... |   | ...     |
-        // | S_v   S_{v+1} ... S_{2v-1}| | Λ_1 |   | S_{2v}  |
-
-        for (int i = 0; i < v; i++) {
-            for (int j = 0; j < v; j++) {
-                matrix[i][j] = syndromes[i + j];
-            }
-            rhs[i] = syndromes[i + v];
-        }
-
-        // Check if matrix is singular
-        uint16_t det = determinant(matrix);
-        if (det == 0) {
-            continue;  // Try fewer errors
-        }
-
-        // Solve for error locator coefficients
-        std::vector<uint16_t> lambda(v);
-        if (!solveLinearSystem(matrix, rhs, lambda)) {
-            continue;
-        }
-
-        // Build error locator polynomial: Λ(x) = 1 + Λ_1*x + ... + Λ_v*x^v
-        errorLocator.resize(v + 1);
-        errorLocator[0] = 1;
-        for (int i = 0; i < v; i++) {
-            errorLocator[i + 1] = lambda[i];
-        }
-
-        numErrors = v;
-        return true;
+    std::vector<uint8_t> shifted(vector.size());
+    // Przesuń w prawo: ostatni element idzie na początek
+    shifted[0] = vector[vector.size() - 1];
+    for (size_t i = 1; i < vector.size(); i++) {
+        shifted[i] = vector[i - 1];
     }
-
-    // No errors or all syndromes are zero
-    if (syndromes[0] == 0) {
-        errorLocator = {1};  // No errors
-        numErrors = 0;
-        return true;
-    }
-
-    return false;  // Unable to find error locator polynomial
+    return shifted;
 }
 
-std::vector<int> BCHDecoder::chienSearch(
-    const std::vector<uint16_t>& errorLocator) {
-    std::vector<int> errorPositions;
+std::vector<uint8_t> BCHDecoder::cyclicShiftLeft(
+    const std::vector<uint8_t>& vector) {
+    if (vector.empty()) return vector;
 
-    // Chien search: evaluate Λ(α^-i) for i = 0, 1, ..., n-1
-    // If Λ(α^-i) = 0, then error is at position i
-    for (int i = 0; i < encoder.n; i++) {
-        // Evaluate at α^-i = α^(n-i)
-        int exponent = (encoder.n - i) % encoder.n;
-        uint16_t alphaInv = encoder.alphaToInt[exponent];
-
-        uint16_t result = evaluatePolynomial(errorLocator, alphaInv);
-
-        if (result == 0) {
-            errorPositions.push_back(i);
-        }
+    std::vector<uint8_t> shifted(vector.size());
+    // Przesuń w lewo: pierwszy element idzie na koniec
+    for (size_t i = 0; i < vector.size() - 1; i++) {
+        shifted[i] = vector[i + 1];
     }
-
-    return errorPositions;
-}
-
-uint16_t BCHDecoder::determinant(
-    const std::vector<std::vector<uint16_t>>& matrix) {
-    int n = matrix.size();
-    if (n == 0) return 0;
-    if (n == 1) return matrix[0][0];
-    if (n == 2) {
-        uint16_t a = encoder.gfMultiply(matrix[0][0], matrix[1][1]);
-        uint16_t b = encoder.gfMultiply(matrix[0][1], matrix[1][0]);
-        return encoder.gfAdd(a, b);
-    }
-
-    // For larger matrices, use expansion (simplified for small t)
-    uint16_t det = 0;
-    for (int j = 0; j < n; j++) {
-        // Create submatrix
-        std::vector<std::vector<uint16_t>> submatrix(
-            n - 1, std::vector<uint16_t>(n - 1));
-        for (int i = 1; i < n; i++) {
-            int col = 0;
-            for (int k = 0; k < n; k++) {
-                if (k == j) continue;
-                submatrix[i - 1][col++] = matrix[i][k];
-            }
-        }
-
-        uint16_t cofactor =
-            encoder.gfMultiply(matrix[0][j], determinant(submatrix));
-        det = encoder.gfAdd(det, cofactor);  // In GF(2), no sign alternation
-    }
-
-    return det;
-}
-
-bool BCHDecoder::solveLinearSystem(
-    const std::vector<std::vector<uint16_t>>& matrix,
-    const std::vector<uint16_t>& rhs, std::vector<uint16_t>& solution) {
-    int n = matrix.size();
-    solution.resize(n);
-
-    // Use Cramer's rule for small systems
-    uint16_t det = determinant(matrix);
-    if (det == 0) return false;
-
-    // Find multiplicative inverse of determinant
-    int logDet = encoder.intToAlpha[det];
-    int logDetInv = (encoder.n - logDet) % encoder.n;
-    uint16_t detInv = encoder.alphaToInt[logDetInv];
-
-    for (int i = 0; i < n; i++) {
-        // Replace column i with rhs
-        std::vector<std::vector<uint16_t>> matrixI = matrix;
-        for (int j = 0; j < n; j++) {
-            matrixI[j][i] = rhs[j];
-        }
-
-        uint16_t detI = determinant(matrixI);
-        solution[i] = encoder.gfMultiply(detI, detInv);
-    }
-
-    return true;
+    shifted[vector.size() - 1] = vector[0];
+    return shifted;
 }
 
 int BCHDecoder::decode(const std::vector<uint8_t>& received,
@@ -568,10 +435,10 @@ int BCHDecoder::decode(const std::vector<uint8_t>& received,
     std::vector<uint8_t> corrected = decodeCodeword(received, errorCount);
 
     if (errorCount < 0) {
-        return -1;  // Decoding failed
+        return -1;  // Dekodowanie nieudane
     }
 
-    // Extract message from corrected codeword (systematic code)
+    // Wyodrębnij wiadomość ze skorygowanego słowa kodowego (kod systematyczny)
     int parityBits = encoder.n - encoder.k;
     correctedMessage.resize(encoder.k);
     for (int i = 0; i < encoder.k; i++) {
@@ -586,64 +453,72 @@ std::vector<uint8_t> BCHDecoder::decodeCodeword(
     errorCount = 0;
 
     if (received.size() != (size_t)encoder.n) {
-        std::cerr << "Error: Received codeword length must be " << encoder.n
-                  << " bits, got " << received.size() << std::endl;
+        std::cerr << "Błąd: Długość odebranego słowa musi być " << encoder.n
+                  << " bitów, otrzymano " << received.size() << std::endl;
         errorCount = -1;
         return {};
     }
 
-    // Step 1: Calculate syndromes
-    std::vector<uint16_t> syndromes = calculateSyndromes(received);
+    std::vector<uint8_t> currentVector = received;
+    int shifts = 0;
 
-    // Check if all syndromes are zero (no errors)
-    bool allZero = true;
-    for (auto s : syndromes) {
-        if (s != 0) {
-            allZero = false;
-            break;
+    // Główna pętla dekodowania
+    while (shifts <= encoder.n) {
+        // Krok 1: Oblicz syndrom
+        std::vector<uint8_t> syndrome = calculateSyndrome(currentVector);
+
+        // Krok 2: Oblicz wagę Hamminga syndromu
+        int weight = hammingWeight(syndrome);
+
+        std::cout << "Przesunięcie " << shifts
+                  << ": waga syndromu = " << weight;
+
+        // Sprawdź czy wszystkie bity syndromu są zerowe (brak błędów)
+        bool syndromeZero = (weight == 0);
+
+        if (syndromeZero && shifts == 0) {
+            std::cout << " - brak błędów" << std::endl;
+            return currentVector;  // Brak błędów
         }
-    }
 
-    if (allZero) {
-        std::cout << "No errors detected" << std::endl;
-        return received;  // No errors
-    }
+        // Przypadek 1: w(s) ≤ t - błędy w części kontrolnej
+        if (weight <= encoder.t) {
+            std::cout << " ≤ t=" << encoder.t
+                      << " - korekcja błędów w części kontrolnej" << std::endl;
 
-    // Step 2: Find error locator polynomial
-    std::vector<uint16_t> errorLocator;
-    int numErrors;
+            // Korekcja: c_D = c_Y + s
+            std::vector<uint8_t> corrected = currentVector;
 
-    if (!findErrorLocatorPolynomial(syndromes, errorLocator, numErrors)) {
-        std::cerr << "Unable to find error locator polynomial - too many errors"
+            // Dodaj syndrom do pierwszych (n-k) bitów (część kontrolna)
+            int parityBits = encoder.n - encoder.k;
+            for (int i = 0; i < parityBits && i < (int)syndrome.size(); i++) {
+                corrected[i] = corrected[i] ^ syndrome[i];  // XOR w GF(2)
+            }
+
+            // Jeśli były przesunięcia, cofnij je (przesuń w lewo)
+            for (int i = 0; i < shifts; i++) {
+                corrected = cyclicShiftLeft(corrected);
+            }
+
+            errorCount = weight;
+
+            std::cout << "Skorygowano " << errorCount << " błąd(ów)"
+                      << std::endl;
+            return corrected;
+        }
+
+        // Przypadek 2: w(s) > t - błędy w części informacyjnej
+        // Przesuń cyklicznie w prawo i spróbuj ponownie
+        std::cout << " > t=" << encoder.t << " - przesuwam cyklicznie w prawo"
                   << std::endl;
-        errorCount = -1;
-        return received;  // Return uncorrected
+
+        currentVector = cyclicShiftRight(currentVector);
+        shifts++;
     }
 
-    std::cout << "Detected " << numErrors << " error(s)" << std::endl;
-
-    // Step 3: Find error locations using Chien search
-    std::vector<int> errorPositions = chienSearch(errorLocator);
-
-    if (errorPositions.size() != (size_t)numErrors) {
-        std::cerr << "Error location mismatch: expected " << numErrors
-                  << " errors, found " << errorPositions.size() << std::endl;
-        errorCount = -1;
-        return received;
-    }
-
-    std::cout << "Error positions: ";
-    for (auto pos : errorPositions) {
-        std::cout << pos << " ";
-    }
-    std::cout << std::endl;
-
-    // Step 4: Correct errors (flip bits for binary BCH)
-    std::vector<uint8_t> corrected = received;
-    for (int pos : errorPositions) {
-        corrected[pos] ^= 1;  // Flip bit
-    }
-
-    errorCount = numErrors;
-    return corrected;
+    // Po n przesunięciach nie udało się skorygować - błędy niekorygowalne
+    std::cerr << "BŁĄD: Nie udało się skorygować po " << shifts
+              << " przesunięciach - błędy niekorygowalne!" << std::endl;
+    errorCount = -1;
+    return received;  // Zwróć niezmieniony wektor
 }
