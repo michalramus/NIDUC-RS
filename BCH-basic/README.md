@@ -168,20 +168,20 @@ BCHEncoder encoder(4, 2);
 
 // Initialize (builds GF and generator polynomial)
 ### Encoder
-✓ **Flexible Parameters**: Control m, t, and primitive polynomial  
-✓ **Cyclotomic Cosets**: Automatic generation for BCH construction  
-✓ **Minimal Polynomials**: Computed from cyclotomic cosets  
-✓ **Generator Polynomial**: LCM of minimal polynomials  
-✓ **Systematic Encoding**: Message preserved in codeword  
-✓ **GF(2^m) Arithmetic**: Efficient using logarithm tables  
+ **Flexible Parameters**: Control m, t, and primitive polynomial  
+ **Cyclotomic Cosets**: Automatic generation for BCH construction  
+ **Minimal Polynomials**: Computed from cyclotomic cosets  
+ **Generator Polynomial**: LCM of minimal polynomials  
+ **Systematic Encoding**: Message preserved in codeword  
+ **GF(2^m) Arithmetic**: Efficient using logarithm tables  
 
 ### Decoder
-✓ **Syndrome Calculation**: Evaluates at generator polynomial roots  
-✓ **Peterson's Algorithm**: Simplified error locator computation  
-✓ **Chien Search**: Efficient error location finding  
-✓ **Error Correction**: Automatic bit-flip correction for binary codes  
-✓ **Graceful Failure**: Detects uncorrectable error patterns  
-✓ **Test Suite**: Multiple test cases demonstrating capabilitie
+ **Syndrome Calculation**: Evaluates at generator polynomial roots  
+ **Peterson's Algorithm**: Simplified error locator computation  
+ **Chien Search**: Efficient error location finding  
+ **Error Correction**: Automatic bit-flip correction for binary codes  
+ **Graceful Failure**: Detects uncorrectable error patterns  
+ **Test Suite**: Multiple test cases demonstrating capabilitie
 encoder.printCodeInfo();  // Shows BCH(15, k, 5)
 
 // Encode a message
@@ -193,12 +193,12 @@ std::vector<uint8_t> codeword = encoder.encode(message);
 
 ## Key Features
 
-✓ **Flexible Parameters**: Control m, t, and primitive polynomial  
-✓ **Cyclotomic Cosets**: Automatic generation for BCH construction  
-✓ **Minimal Polynomials**: Computed from cyclotomic cosets  
-✓ **Generator Polynomial**: LCM of minimal polynomials  
-✓ **Systematic Encoding**: Message preserved in codeword  
-✓ **GF(2^m) Arithmetic**: Efficient using logarithm tables  
+ **Flexible Parameters**: Control m, t, and primitive polynomial  
+ **Cyclotomic Cosets**: Automatic generation for BCH construction  
+ **Minimal Polynomials**: Computed from cyclotomic cosets  
+ **Generator Polynomial**: LCM of minimal polynomials  
+ **Systematic Encoding**: Message preserved in codeword  
+ **GF(2^m) Arithmetic**: Efficient using logarithm tables  
 
 ## Primitive Polynomials
 
@@ -238,13 +238,13 @@ pio run -e esp8266_receiver -t monitor
 
 Initializing BCH(15, k, 5) over GF(2^4)
 Primitive polynomial: 0x13
-✓ Galois Field GF(2^4) constructed
+ Galois Field GF(2^4) constructed
 Cyclotomic cosets for roots α^1 to α^4:
   Coset 0: {1, 2, 4, 8}
   Coset 1: {3, 6, 12, 9}
   Minimal polynomial for coset: x^4 + x + 1
   Minimal polynomial for coset: x^4 + x^3 + x^2 + x + 1
-✓ Generator polynomial g(x) constructed
+ Generator polynomial g(x) constructed
   Degree: 8
   Message length k: 7
 
@@ -271,7 +271,7 @@ Encoded codeword (15 bits): 101100111001001
 No errors detected
 Errors corrected: 0
 Decoded message: 1001001
-Decoding result: ✓ CORRECT
+Decoding result:  CORRECT
 
 --- Test 2: Single Error at Position 5 ---
 Received (corrupted): 101101111001001
@@ -279,7 +279,7 @@ Detected 1 error(s)
 Error positions: 5
 Errors corrected: 1
 Decoded message: 1001001
-Decoding result: ✓ CORRECT
+Decoding result:  CORRECT
 
 --- Test 3: Double Error at Positions 3 and 10 ---
 Received (corrupted): 101000110001001
@@ -287,7 +287,7 @@ Detected 2 error(s)
 Error positions: 3 10
 Errors corrected: 2
 Decoded message: 1001001
-Decoding result: ✓ CORRECT
+Decoding result:  CORRECT
 
 --- Test 4: Triple Error (Beyond Correction Capability) ---
 Received (corrupted): 100100101001101
@@ -325,10 +325,10 @@ Where:
 - v is the number of errors (try from t down to 1)
 
 ### Advantages of This Implementation
-- ✓ **Simple and understandable** - Peterson's algorithm is easier to grasp than Berlekamp-Massey
-- ✓ **Works well for small t** - Efficient for t ≤ 3
-- ✓ **Direct matrix solution** - Uses Cramer's rule in GF(2^m)
-- ✓ **Educational value** - Shows clear relationship between syndromes and errors
+-  **Simple and understandable** - Peterson's algorithm is easier to grasp than Berlekamp-Massey
+-  **Works well for small t** - Efficient for t ≤ 3
+-  **Direct matrix solution** - Uses Cramer's rule in GF(2^m)
+-  **Educational value** - Shows clear relationship between syndromes and errors
 
 ### Limitations
 - Matrix inversion complexity increases with t (O(t³))

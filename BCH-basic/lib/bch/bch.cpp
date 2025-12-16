@@ -78,15 +78,20 @@ uint16_t BCHEncoder::gfMultiply(uint16_t a, uint16_t b) {
     return alphaToInt[logResult];
 }
 
-uint16_t BCHEncoder::gfPower(uint16_t alpha, int power) {
-    if (power == 0) return 1;
-    if (alpha == 0) return 0;
+// uint16_t BCHEncoder::gfPower(uint16_t alpha, int power) {
+//     if (power == 0) return 1;
+//     if (alpha == 0) return 0;
+//     if (alpha == 1) return 1;  // 1^power = 1
 
-    power = power % n;  // α^n = α^0 = 1 in GF(2^m)
-    if (power < 0) power += n;
+//     // Znajdź logarytm alpha (wykładnik elementu pierwotnego)
+//     int logAlpha = intToAlpha[alpha];
 
-    return alphaToInt[power];
-}
+//     // Oblicz logarytm wyniku: log(alpha^power) = logAlpha * power
+//     int logResult = (logAlpha * power) % n;
+//     if (logResult < 0) logResult += n;
+
+//     return alphaToInt[logResult];
+// }
 
 std::vector<std::set<int>> BCHEncoder::generateCyclotomicCosets() {
     std::vector<std::set<int>> cosets;
@@ -158,6 +163,7 @@ std::vector<uint8_t> BCHEncoder::polyMultiply(const std::vector<uint8_t>& a,
     return result;
 }
 
+// Greatest common divisor
 std::vector<uint8_t> BCHEncoder::polyGCD(const std::vector<uint8_t>& a,
                                          const std::vector<uint8_t>& b) {
     std::vector<uint8_t> u = a;
@@ -173,6 +179,7 @@ std::vector<uint8_t> BCHEncoder::polyGCD(const std::vector<uint8_t>& a,
     return u;
 }
 
+// Least common multiple
 std::vector<uint8_t> BCHEncoder::polyLCM(const std::vector<uint8_t>& a,
                                          const std::vector<uint8_t>& b) {
     std::vector<uint8_t> gcd = polyGCD(a, b);
@@ -231,8 +238,8 @@ void BCHEncoder::generateGeneratorPolynomial() {
     // Generate cyclotomic cosets
     auto cosets = generateCyclotomicCosets();
 
-    std::cout << "Cyclotomic cosets for roots α^1 to α^" << (2 * t) << ":"
-              << std::endl;
+    std::cout << "Cyclotomic cosets for roots alpha^1 to alpha^" << (2 * t)
+              << ":" << std::endl;
     for (size_t i = 0; i < cosets.size(); i++) {
         std::cout << "  Coset " << i << ": {";
         bool first = true;
@@ -287,11 +294,11 @@ bool BCHEncoder::initialize() {
 
     // Step 1: Build Galois Field
     buildGaloisField();
-    std::cout << "✓ Galois Field GF(2^" << m << ") constructed" << std::endl;
+    std::cout << " Galois Field GF(2^" << m << ") constructed" << std::endl;
 
     // Step 2: Generate generator polynomial
     generateGeneratorPolynomial();
-    std::cout << "✓ Generator polynomial g(x) constructed" << std::endl;
+    std::cout << " Generator polynomial g(x) constructed" << std::endl;
     std::cout << "  Degree: " << polyDegree(generatorPoly) << std::endl;
     std::cout << "  Message length k: " << k << std::endl;
 
@@ -381,12 +388,12 @@ BCHDecoder::BCHDecoder(BCHEncoder& encoder) : encoder(encoder) {}
 
 std::vector<uint8_t> BCHDecoder::calculateSyndrome(
     const std::vector<uint8_t>& received) {
-    // Syndrom = reszta z dzielenia odebranego wektora przez wielomian
-    // generujący
+    // Syndrome = remainder from dividing received vector by generator
+    // polynomial
     std::vector<uint8_t> remainder;
     encoder.polyDivide(received, encoder.generatorPoly, remainder);
 
-    // Wyrównaj długość syndromu do (n-k) bitów
+    // Align syndrome length to (n-k) bits
     int parityBits = encoder.n - encoder.k;
     if (remainder.size() < (size_t)parityBits) {
         remainder.resize(parityBits, 0);
@@ -408,7 +415,7 @@ std::vector<uint8_t> BCHDecoder::cyclicShiftRight(
     if (vector.empty()) return vector;
 
     std::vector<uint8_t> shifted(vector.size());
-    // Przesuń w prawo: ostatni element idzie na początek
+    // Shift right: last element goes to the beginning
     shifted[0] = vector[vector.size() - 1];
     for (size_t i = 1; i < vector.size(); i++) {
         shifted[i] = vector[i - 1];
@@ -421,7 +428,7 @@ std::vector<uint8_t> BCHDecoder::cyclicShiftLeft(
     if (vector.empty()) return vector;
 
     std::vector<uint8_t> shifted(vector.size());
-    // Przesuń w lewo: pierwszy element idzie na koniec
+    // Shift left: first element goes to the end
     for (size_t i = 0; i < vector.size() - 1; i++) {
         shifted[i] = vector[i + 1];
     }
@@ -435,10 +442,10 @@ int BCHDecoder::decode(const std::vector<uint8_t>& received,
     std::vector<uint8_t> corrected = decodeCodeword(received, errorCount);
 
     if (errorCount < 0) {
-        return -1;  // Dekodowanie nieudane
+        return -1;  // Decoding failed
     }
 
-    // Wyodrębnij wiadomość ze skorygowanego słowa kodowego (kod systematyczny)
+    // Extract message from corrected codeword (systematic code)
     int parityBits = encoder.n - encoder.k;
     correctedMessage.resize(encoder.k);
     for (int i = 0; i < encoder.k; i++) {
@@ -453,8 +460,8 @@ std::vector<uint8_t> BCHDecoder::decodeCodeword(
     errorCount = 0;
 
     if (received.size() != (size_t)encoder.n) {
-        std::cerr << "Błąd: Długość odebranego słowa musi być " << encoder.n
-                  << " bitów, otrzymano " << received.size() << std::endl;
+        std::cerr << "Error: Received word length must be " << encoder.n
+                  << " bits, got " << received.size() << std::endl;
         errorCount = -1;
         return {};
     }
@@ -462,63 +469,61 @@ std::vector<uint8_t> BCHDecoder::decodeCodeword(
     std::vector<uint8_t> currentVector = received;
     int shifts = 0;
 
-    // Główna pętla dekodowania
+    // Main decoding loop
     while (shifts <= encoder.n) {
-        // Krok 1: Oblicz syndrom
+        // Step 1: Calculate syndrome
         std::vector<uint8_t> syndrome = calculateSyndrome(currentVector);
 
-        // Krok 2: Oblicz wagę Hamminga syndromu
+        // Step 2: Calculate Hamming weight of syndrome
         int weight = hammingWeight(syndrome);
 
-        std::cout << "Przesunięcie " << shifts
-                  << ": waga syndromu = " << weight;
+        std::cout << "Shift " << shifts << ": syndrome weight = " << weight;
 
-        // Sprawdź czy wszystkie bity syndromu są zerowe (brak błędów)
+        // Check if all syndrome bits are zero (no errors)
         bool syndromeZero = (weight == 0);
 
         if (syndromeZero && shifts == 0) {
-            std::cout << " - brak błędów" << std::endl;
-            return currentVector;  // Brak błędów
+            std::cout << " - no errors" << std::endl;
+            return currentVector;  // No errors
         }
 
-        // Przypadek 1: w(s) ≤ t - błędy w części kontrolnej
+        // Case 1: w(s) ≤ t - errors in parity part
         if (weight <= encoder.t) {
             std::cout << " ≤ t=" << encoder.t
-                      << " - korekcja błędów w części kontrolnej" << std::endl;
+                      << " - correcting errors in parity part" << std::endl;
 
-            // Korekcja: c_D = c_Y + s
+            // Correction: c_D = c_Y + s
             std::vector<uint8_t> corrected = currentVector;
 
-            // Dodaj syndrom do pierwszych (n-k) bitów (część kontrolna)
+            // Add syndrome to first (n-k) bits (parity part)
             int parityBits = encoder.n - encoder.k;
             for (int i = 0; i < parityBits && i < (int)syndrome.size(); i++) {
-                corrected[i] = corrected[i] ^ syndrome[i];  // XOR w GF(2)
+                corrected[i] = corrected[i] ^ syndrome[i];  // XOR in GF(2)
             }
 
-            // Jeśli były przesunięcia, cofnij je (przesuń w lewo)
+            // If there were shifts, undo them (shift left)
             for (int i = 0; i < shifts; i++) {
                 corrected = cyclicShiftLeft(corrected);
             }
 
             errorCount = weight;
 
-            std::cout << "Skorygowano " << errorCount << " błąd(ów)"
-                      << std::endl;
+            std::cout << "Corrected " << errorCount << " error(s)" << std::endl;
             return corrected;
         }
 
-        // Przypadek 2: w(s) > t - błędy w części informacyjnej
-        // Przesuń cyklicznie w prawo i spróbuj ponownie
-        std::cout << " > t=" << encoder.t << " - przesuwam cyklicznie w prawo"
+        // Case 2: w(s) > t - errors in information part
+        // Shift cyclically right and try again
+        std::cout << " > t=" << encoder.t << " - shifting cyclically right"
                   << std::endl;
 
         currentVector = cyclicShiftRight(currentVector);
         shifts++;
     }
 
-    // Po n przesunięciach nie udało się skorygować - błędy niekorygowalne
-    std::cerr << "BŁĄD: Nie udało się skorygować po " << shifts
-              << " przesunięciach - błędy niekorygowalne!" << std::endl;
+    // After n shifts failed to correct - uncorrectable errors
+    std::cerr << "ERROR: Failed to correct after " << shifts
+              << " shifts - uncorrectable errors!" << std::endl;
     errorCount = -1;
-    return received;  // Zwróć niezmieniony wektor
+    return received;  // Return unchanged vector
 }

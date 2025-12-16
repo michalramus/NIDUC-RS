@@ -67,7 +67,7 @@ class BCHEncoder {
     void buildGaloisField();
     uint16_t gfMultiply(uint16_t a, uint16_t b);
     uint16_t gfAdd(uint16_t a, uint16_t b);
-    uint16_t gfPower(uint16_t alpha, int power);
+    // uint16_t gfPower(uint16_t alpha, int power);
 
     // Cyclotomic coset generation
     std::vector<std::set<int>> generateCyclotomicCosets();

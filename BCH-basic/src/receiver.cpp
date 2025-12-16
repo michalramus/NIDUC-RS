@@ -66,7 +66,7 @@ void setup() {
 
     bool correct1 = (decoded1 == message);
     Serial.print("\nDecoding result: ");
-    Serial.println(correct1 ? "✓ CORRECT" : "✗ INCORRECT");
+    Serial.println(correct1 ? " CORRECT" : " INCORRECT");
     Serial.println();
 
     // ========== Test Case 2: Single error ==========
@@ -92,7 +92,7 @@ void setup() {
 
     bool correct2 = (decoded2 == message);
     Serial.print("\nDecoding result: ");
-    Serial.println(correct2 ? "✓ CORRECT" : "✗ INCORRECT");
+    Serial.println(correct2 ? " CORRECT" : " INCORRECT");
     Serial.println();
 
     // ========== Test Case 3: Double error (maximum correctable) ==========
@@ -119,7 +119,7 @@ void setup() {
 
     bool correct3 = (decoded3 == message);
     Serial.print("\nDecoding result: ");
-    Serial.println(correct3 ? "✓ CORRECT" : "✗ INCORRECT");
+    Serial.println(correct3 ? " CORRECT" : " INCORRECT");
     Serial.println();
 
     // ========== Test Case 4: Triple error (uncorrectable) ==========
@@ -150,7 +150,7 @@ void setup() {
         }
         bool correct4 = (decoded4 == message);
         Serial.print("\nDecoding result: ");
-        Serial.println(correct4 ? "✓ CORRECT" : "✗ INCORRECT (expected)");
+        Serial.println(correct4 ? " CORRECT" : " INCORRECT (expected)");
     }
     Serial.println();
 
