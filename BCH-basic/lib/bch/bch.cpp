@@ -78,20 +78,6 @@ uint16_t BCHEncoder::gfMultiply(uint16_t a, uint16_t b) {
     return alphaToInt[logResult];
 }
 
-// uint16_t BCHEncoder::gfPower(uint16_t alpha, int power) {
-//     if (power == 0) return 1;
-//     if (alpha == 0) return 0;
-//     if (alpha == 1) return 1;  // 1^power = 1
-
-//     // Znajdź logarytm alpha (wykładnik elementu pierwotnego)
-//     int logAlpha = intToAlpha[alpha];
-
-//     // Oblicz logarytm wyniku: log(alpha^power) = logAlpha * power
-//     int logResult = (logAlpha * power) % n;
-//     if (logResult < 0) logResult += n;
-
-//     return alphaToInt[logResult];
-// }
 
 std::vector<std::set<int>> BCHEncoder::generateCyclotomicCosets() {
     std::vector<std::set<int>> cosets;
@@ -477,20 +463,20 @@ std::vector<uint8_t> BCHDecoder::decodeCodeword(
         // Step 2: Calculate Hamming weight of syndrome
         int weight = hammingWeight(syndrome);
 
-        std::cout << "Shift " << shifts << ": syndrome weight = " << weight;
+        // std::cout << "Shift " << shifts << ": syndrome weight = " << weight;
 
         // Check if all syndrome bits are zero (no errors)
         bool syndromeZero = (weight == 0);
 
         if (syndromeZero && shifts == 0) {
-            std::cout << " - no errors" << std::endl;
+            // std::cout << " - no errors" << std::endl;
             return currentVector;  // No errors
         }
 
         // Case 1: w(s) ≤ t - errors in parity part
         if (weight <= encoder.t) {
-            std::cout << " ≤ t=" << encoder.t
-                      << " - correcting errors in parity part" << std::endl;
+            // std::cout << " ≤ t=" << encoder.t
+                    //   << " - correcting errors in parity part" << std::endl;
 
             // Correction: c_D = c_Y + s
             std::vector<uint8_t> corrected = currentVector;
@@ -508,22 +494,22 @@ std::vector<uint8_t> BCHDecoder::decodeCodeword(
 
             errorCount = weight;
 
-            std::cout << "Corrected " << errorCount << " error(s)" << std::endl;
+            // std::cout << "Corrected " << errorCount << " error(s)" << std::endl;
             return corrected;
         }
 
         // Case 2: w(s) > t - errors in information part
         // Shift cyclically right and try again
-        std::cout << " > t=" << encoder.t << " - shifting cyclically right"
-                  << std::endl;
+        // std::cout << " > t=" << encoder.t << " - shifting cyclically right"
+                //   << std::endl;
 
         currentVector = cyclicShiftRight(currentVector);
         shifts++;
     }
 
     // After n shifts failed to correct - uncorrectable errors
-    std::cerr << "ERROR: Failed to correct after " << shifts
-              << " shifts - uncorrectable errors!" << std::endl;
+    // std::cerr << "ERROR: Failed to correct after " << shifts
+            //   << " shifts - uncorrectable errors!" << std::endl;
     errorCount = -1;
     return received;  // Return unchanged vector
 }
